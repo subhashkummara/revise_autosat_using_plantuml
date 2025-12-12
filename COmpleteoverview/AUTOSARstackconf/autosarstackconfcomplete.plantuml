@@ -1,0 +1,1132 @@
+@startuml AUTOSAR_COM_Stack_Configuration_Complete
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 10
+skinparam packageStyle rectangle
+skinparam maxMessageSize 300
+
+title AUTOSAR COM Stack - Complete Configuration Path & Bit-Level Analysis
+
+' ============ INPUT SOURCES ============
+package "Configuration Input Sources" as ConfigInput #E3F2FD {
+    rectangle "CAN Database (DBC/ARXML)\n- Messages\n- Signals\n- IDs\n- Timing" as CANDB #BBDEFB
+    rectangle "ECU Extract (ECUEX)\n- Accepted CAN IDs\n- PDU Mappings\n- Frame Formats" as ECUEX #BBDEFB
+    rectangle "System Description\n- Network Topology\n- ECU Assignments" as SysDesc #BBDEFB
+    rectangle "OEM Requirements\n- Filtering Strategy\n- Security Policies" as OEMReq #BBDEFB
+}
+
+' ============ LAYER 1: APPLICATION LAYER ============
+package "Application Layer Configuration" as AppLayer #E8F5E9 {
+    rectangle "SWC (Software Component)" as SWC #C8E6C9 {
+        note right
+            **Configuration:**
+            - SwcInternalBehavior
+            - RunnableEntity
+            - DataElements
+            - PortPrototypes
+        end note
+    }
+    
+    rectangle "Signal Definitions" as SigDef #C8E6C9 {
+        note right
+            **Parameters:**
+            - Signal Name
+            - Data Type (uint8/16/32, float, boolean)
+            - Initial Value
+            - InvalidValue
+            - Min/Max Range
+        end note
+    }
+}
+
+' ============ RTE LAYER ============
+rectangle "AUTOSAR RTE (Runtime Environment)" as RTE #FFF9C4 {
+    note right
+        **Generated Code:**
+        - Rte_Read_<signal>()
+        - Rte_Write_<signal>()
+        - Rte_Call_<operation>()
+        - Inter-ECU Communication APIs
+    end note
+}
+
+' ============ LAYER 2: COM MODULE ============
+package "COM Module Configuration" as COMModule #F3E5F5 {
+    
+    rectangle "ComConfig" as ComConfig #E1BEE7 {
+        note right
+            **Top Level Parameters:**
+            - ComConfigurationId
+            - ComConfigurationTimeBase (ms)
+            - ComEnableMDTForCyclicTransmission
+            - ComRetryFailedTransmitRequests
+        end note
+    }
+    
+    rectangle "ComSignal" as ComSignal #E1BEE7 {
+        note right
+            **Critical Parameters:**
+            
+            **1. ComSignalId** (uint16)
+            - Unique ID per signal
+            
+            **2. ComSignalType**
+            - BOOLEAN, UINT8, UINT16, UINT32
+            - SINT8, SINT16, SINT32
+            - FLOAT32, FLOAT64
+            - UINT8_N, UINT8_DYN
+            
+            **3. ComBitPosition** (0-63)
+            - Start bit in I-PDU
+            - Intel/Motorola byte order
+            
+            **4. ComBitSize** (1-64 bits)
+            
+            **5. ComSignalEndianness**
+            - OPAQUE (no swap)
+            - BIG_ENDIAN (Motorola)
+            - LITTLE_ENDIAN (Intel)
+            
+            **6. ComSignalInitValue**
+            - Hex value (0x00 to 0xFFFFFFFF...)
+            
+            **7. ComTransferProperty**
+            - PENDING
+            - TRIGGERED
+            - TRIGGERED_ON_CHANGE
+            - TRIGGERED_ON_CHANGE_WITHOUT_REPETITION
+            - TRIGGERED_WITHOUT_REPETITION
+            
+            **8. ComUpdateBitPosition**
+            - For signal update bit
+            
+            **9. ComSignalDataInvalidValue**
+            - Used for timeout handling
+            
+            **10. ComDataInvalidAction**
+            - NOTIFY, REPLACE, SUBSTITUTE
+            
+            **11. ComRxDataTimeoutAction**
+            - NONE, REPLACE, SUBSTITUTE
+            
+            **12. ComFirstTimeout** (ms)
+            
+            **13. ComTimeout** (ms)
+            
+            **14. ComFilterAlgorithm**
+            - ALWAYS, NEVER
+            - MASKED_NEW_DIFFERS_MASKED_OLD
+            - MASKED_NEW_DIFFERS_X
+            - MASKED_NEW_EQUALS_X
+            - NEW_IS_OUTSIDE
+            - NEW_IS_WITHIN
+            - ONE_EVERY_N
+            
+            **15. ComFilter Parameters**
+            - ComFilterMask (hex)
+            - ComFilterX (hex)
+            - ComFilterMin
+            - ComFilterMax
+            - ComFilterOffset
+            - ComFilterPeriod
+        end note
+    }
+    
+    rectangle "ComIPdu" as ComIPdu #E1BEE7 {
+        note right
+            **TX I-PDU Parameters:**
+            
+            **1. ComIPduId** (uint16)
+            
+            **2. ComIPduDirection**
+            - SEND, RECEIVE
+            
+            **3. ComIPduSignalProcessing**
+            - IMMEDIATE, DEFERRED
+            
+            **4. ComIPduType**
+            - NORMAL, TP
+            
+            **5. ComIPduClearUpdateBit**
+            - TRANSMIT, CONFIRMATION
+            - TRIGGER_TRANSMIT
+            
+            **6. ComTxIPdu Parameters:**
+            - ComTxIPduMinimumDelayTime (MDT)
+            - ComTxModeMode: DIRECT, MIXED, PERIODIC, NONE
+            - ComTxModeNumberOfRepetitions
+            - ComTxModeRepetitionPeriod
+            - ComTxModeTimePeriod (cycle time)
+            - ComTxModeTimeOffset
+            
+            **7. ComTxIPduUnusedAreasDefault**
+            - 0x00, 0xFF, or custom pattern
+            
+            **RX I-PDU Parameters:**
+            
+            **8. ComIPduReplication** (for safety)
+            
+            **9. ComIPduCallout**
+            - Custom callback function
+            
+            **10. ComRxIPduTimeout** (ms)
+            
+            **11. ComRxIPduTimeoutAction**
+        end note
+    }
+    
+    rectangle "ComIPduGroup" as ComIPduGroup #E1BEE7 {
+        note right
+            **Parameters:**
+            - ComIPduGroupId
+            - Start/Stop control
+            - Used by ComM for mode management
+        end note
+    }
+}
+
+' ============ LAYER 3: PDUR MODULE ============
+package "PduR (PDU Router) Configuration" as PduRModule #DCE775 {
+    
+    rectangle "PduRRoutingTable" as PduRRouting #C0CA33 {
+        note right
+            **PduRRoutingPath:**
+            
+            **1. PduRSrcPduRef**
+            - Reference to source PDU
+            
+            **2. PduRDestPduRef**
+            - Reference to destination PDU
+            
+            **3. PduRRoutingPathGroup**
+            - Enable/Disable routing
+            
+            **4. PduRDefaultValue**
+            - Used when no data available
+            
+            **5. PduRTpThreshold**
+            - For TP routing optimization
+            
+            **Routing Types:**
+            - IF → IF (zero-copy)
+            - IF → TP (segmentation)
+            - TP → IF (assembly)
+            - TP → TP (on-the-fly)
+        end note
+    }
+    
+    rectangle "PduRGlobalConfig" as PduRGlobal #C0CA33 {
+        note right
+            - PduRConfigurationId
+            - PduRMaxRoutingPathCnt
+            - PduRMemorySize
+            - PduRZeroCostOperation
+        end note
+    }
+}
+
+' ============ LAYER 4: CANIF MODULE (CRITICAL FILTERING) ============
+package "CanIf (CAN Interface) - FILTERING LAYER" as CanIfModule #FFE082 {
+    
+    rectangle "CanIfInitCfg" as CanIfInit #FFD54F {
+        note right
+            **Top Parameters:**
+            - CanIfConfigSet
+            - CanIfNumberOfCanHwUnits
+            - CanIfNumberOfCanTxPduIds
+            - CanIfNumberOfCanRxPduIds
+        end note
+    }
+    
+    rectangle "CanIfHwFilter Configuration" as HWFilter #FFD54F {
+        note right
+            **HARDWARE FILTER MECHANISM**
+            
+            **CanIfHohCfg (Hardware Object Handle):**
+            
+            **1. CanIfCanHardwareObjectRef**
+            - Reference to CanHardwareObject
+            
+            **2. CanObjectType**
+            - RECEIVE (Rx HOH)
+            - TRANSMIT (Tx HOH)
+            
+            **FOR RX HOH:**
+            
+            **3. CanIdType**
+            - STANDARD (11-bit): 0x000 - 0x7FF
+            - EXTENDED (29-bit): 0x00000000 - 0x1FFFFFFF
+            - MIXED
+            
+            **4. CanIfHrhRangeConfig:**
+            
+            **a) CanIfHrhRangeBaseId**
+            - Start CAN ID for range
+            - Example: 0x100
+            
+            **b) CanIfHrhRangeMask**
+            - **CRITICAL PARAMETER**
+            - Bit mask for filtering
+            
+            **STANDARD CAN (11-bit) MASK:**
+            - Full acceptance: 0x000 (all pass)
+            - Full filtering: 0x7FF (exact match)
+            - Partial: 0x700, 0x780, 0x7F0, etc.
+            
+            **Bit-Level Example:**
+            ```
+            CAN ID:    0x123 = 0001 0010 0011
+            Mask:      0x7F0 = 0111 1111 0000
+            Result:    0x120 = 0001 0010 0000
+            
+            Accepts: 0x120 - 0x12F (16 IDs)
+            ```
+            
+            **EXTENDED CAN (29-bit) MASK:**
+            - Full acceptance: 0x00000000
+            - Full filtering: 0x1FFFFFFF
+            - Upper 11-bit filter: 0x1FFC0000
+            
+            **c) CanIfHrhRangeRxPduRangeCanIdType**
+            - STANDARD, EXTENDED
+            
+            **d) CanIfHrhRangeTxBufferRef**
+            - For loopback testing
+            
+            **HOMOLOGATION MODE:**
+            For accepting ALL frames (testing):
+            - Standard: Mask = 0x000
+            - Extended: Mask = 0x00000000
+            
+            **PRODUCTION MODE:**
+            Strict filtering:
+            - Use exact IDs from ECU Extract
+            - Mask = 0x7FF (Standard)
+            - Or specific range masks
+        end note
+    }
+    
+    rectangle "CanIfSoftwareFilter Configuration" as SWFilter #FFD54F {
+        note right
+            **SOFTWARE FILTER MECHANISM**
+            
+            **Applied AFTER hardware filter**
+            
+            **CanIfRxPduCfg:**
+            
+            **1. CanIfRxPduId** (uint16)
+            - Unique identifier
+            
+            **2. CanIfRxPduCanId** (uint32)
+            - **Exact CAN ID expected**
+            - If frame CAN ID ≠ CanIfRxPduCanId
+              → **REJECTED at CanIf**
+            
+            **3. CanIfRxPduCanIdType**
+            - STANDARD_CAN
+            - EXTENDED_CAN
+            - STANDARD_FD_CAN
+            - EXTENDED_FD_CAN
+            
+            **4. CanIfRxPduCanIdMask**
+            - Additional software mask
+            - Applied on top of HW filter
+            
+            **5. CanIfRxPduReadData**
+            - TRUE: Store for polling
+            - FALSE: Direct callback
+            
+            **6. CanIfRxPduReadNotifyStatus**
+            - Notification flag available
+            
+            **7. CanIfRxPduRef**
+            - Reference to upper layer PDU (PduR)
+            
+            **8. CanIfRxPduUserRxIndicationName**
+            - Callback: <User>_RxIndication()
+            
+            **9. CanIfRxPduDlc** (0-64 bytes)
+            - Expected Data Length Check
+            - Mismatch → DET error
+            
+            **FILTERING LEVELS:**
+            
+            **Level 1: Hardware Filter (CanHardwareObject)**
+            - Configured in CAN Controller
+            - Mask-based acceptance
+            - Rejects at silicon level
+            
+            **Level 2: CanIf Software Filter**
+            - Exact CAN ID matching
+            - DLC validation
+            - ID type validation
+            
+            **Level 3: PduR Routing**
+            - Routing path validation
+            - Target module availability
+            
+            **Level 4: COM Signal Filter**
+            - Signal-level filtering
+            - Value range checks
+            - Update bit validation
+        end note
+    }
+    
+    rectangle "CanIfTxPduCfg" as CanIfTxPdu #FFD54F {
+        note right
+            **TX PDU Parameters:**
+            
+            **1. CanIfTxPduId** (uint16)
+            
+            **2. CanIfTxPduCanId** (uint32)
+            - CAN ID to transmit with
+            
+            **3. CanIfTxPduCanIdType**
+            - STANDARD_CAN, EXTENDED_CAN
+            - STANDARD_FD_CAN, EXTENDED_FD_CAN
+            
+            **4. CanIfTxPduType**
+            - STATIC, DYNAMIC
+            
+            **5. CanIfTxPduPnFilterPdu**
+            - Partial Networking support
+            
+            **6. CanIfTxPduReadNotifyStatus**
+            
+            **7. CanIfTxPduTriggerTransmit**
+            - Late data provision
+            
+            **8. CanIfTxPduRef**
+            - Upper layer reference
+            
+            **9. CanIfTxPduUserTxConfirmationName**
+            - Callback function
+            
+            **10. CanIfTxPduBufferRef**
+            - Reference to Tx buffer (HOH)
+        end note
+    }
+    
+    rectangle "CanIfCtrlCfg" as CanIfCtrl #FFD54F {
+        note right
+            **CAN Controller Configuration:**
+            
+            **1. CanIfCtrlId** (uint8)
+            
+            **2. CanIfCtrlCanCtrlRef**
+            - Reference to Can_Controller
+            
+            **3. CanIfCtrlWakeupSupport**
+            - TRUE/FALSE
+            
+            **4. CanIfCtrlPnFilter**
+            - Partial networking filter
+        end note
+    }
+}
+
+' ============ LAYER 5: CAN DRIVER ============
+package "Can Driver Configuration" as CanDriver #FFCCBC {
+    
+    rectangle "CanGeneral" as CanGeneral #FFAB91 {
+        note right
+            - CanDevErrorDetection: ON/OFF
+            - CanMultiplexedTransmission
+            - CanTimeoutDuration
+            - CanVersionInfoApi
+        end note
+    }
+    
+    rectangle "CanController" as CanController #FFAB91 {
+        note right
+            **Controller Parameters:**
+            
+            **1. CanControllerId** (uint8)
+            
+            **2. CanControllerActivation**
+            - TRUE/FALSE
+            
+            **3. CanControllerBaudRate** (kbps)
+            - 125, 250, 500, 1000 (Classic CAN)
+            - Up to 5000 (CAN-FD data phase)
+            
+            **4. CanControllerBaudRateConfig:**
+            - CanControllerPropSeg
+            - CanControllerSeg1
+            - CanControllerSeg2
+            - CanControllerSyncJumpWidth
+            - CanControllerPrescaler
+            
+            **BIT TIMING CALCULATION:**
+            ```
+            Bit Time = Sync + PropSeg + PS1 + PS2
+            Baudrate = Clock / (Prescaler × Bit Time)
+            
+            Example: 500 kbps @ 40 MHz
+            Prescaler = 5
+            Bit Time = 16 TQ
+            ```
+            
+            **5. CanControllerFdBaudRate** (CAN-FD)
+            
+            **6. CanRxProcessing**
+            - INTERRUPT, POLLING, MIXED
+            
+            **7. CanTxProcessing**
+            - INTERRUPT, POLLING, MIXED
+            
+            **8. CanBusOffProcessing**
+            - INTERRUPT, POLLING
+            
+            **9. CanWakeupProcessing**
+            - INTERRUPT, POLLING
+        end note
+    }
+    
+    rectangle "CanHardwareObject" as CanHwObject #FFAB91 {
+        note right
+            **HARDWARE OBJECT (HOH):**
+            
+            **1. CanObjectId** (uint32)
+            - Unique ID for HW object
+            
+            **2. CanObjectType**
+            - RECEIVE: Mailbox for RX
+            - TRANSMIT: Mailbox for TX
+            
+            **3. CanIdType**
+            - STANDARD (11-bit)
+            - EXTENDED (29-bit)
+            - MIXED
+            
+            **4. CanHwObjectCount**
+            - Number of mailboxes
+            
+            **FOR RECEIVE OBJECTS:**
+            
+            **5. CanHwFilter:**
+            
+            **a) CanHwFilterMask**
+            - **HARDWARE ACCEPTANCE FILTER**
+            
+            **Standard CAN Examples:**
+            
+            **Accept All (Homologation):**
+            - Mask: 0x000
+            - Any CAN ID passes HW filter
+            
+            **Accept Upper 8 bits:**
+            - Mask: 0x7F8
+            - Groups of 8 IDs
+            
+            **Accept Upper 7 bits:**
+            - Mask: 0x7F0
+            - Groups of 16 IDs
+            
+            **Accept Upper 4 bits:**
+            - Mask: 0x780
+            - Groups of 128 IDs
+            
+            **Exact Match:**
+            - Mask: 0x7FF
+            - Only one specific ID
+            
+            **Extended CAN Examples:**
+            
+            **Accept All:**
+            - Mask: 0x00000000
+            
+            **Accept J1939 PGN range:**
+            - Mask: 0x03FF0000
+            - Filters on PGN field
+            
+            **Production Strict:**
+            - Mask: 0x1FFFFFFF
+            - Exact ID match
+            
+            **b) CanHwFilterCode**
+            - Base CAN ID for filter
+            
+            **FILTERING LOGIC:**
+            ```
+            Received_CAN_ID & Mask == Code & Mask
+            
+            Example:
+            Code = 0x123
+            Mask = 0x7F0
+            
+            Code & Mask = 0x120
+            
+            Accepts:
+            0x120 & 0x7F0 = 0x120 ✓
+            0x125 & 0x7F0 = 0x120 ✓
+            0x12F & 0x7F0 = 0x120 ✓
+            0x130 & 0x7F0 = 0x130 ✗
+            ```
+            
+            **6. CanMainFunctionRWPeriod** (ms)
+            - Polling period if used
+            
+            **7. CanTriggerTransmitEnable**
+        end note
+    }
+}
+
+' ============ LAYER 6: COMMUNICATION MANAGER (CONTROL PATH) ============
+package "Communication Manager (ComM)" as ComMModule #C5CAE9 {
+    
+    rectangle "ComMChannel" as ComMChannel #9FA8DA {
+        note right
+            **Channel Parameters:**
+            
+            **1. ComMChannelId**
+            
+            **2. ComMNetworkManagement**
+            - Reference to NM channel
+            
+            **3. ComMBusType**
+            - CAN, LIN, FLEXRAY, ETHERNET
+            
+            **4. ComMMainFunctionPeriod** (ms)
+            
+            **5. ComMNmVariant**
+            - FULL, PASSIVE, LIGHT, NONE
+            
+            **6. ComMFullCommRequestNotification**
+        end note
+    }
+    
+    rectangle "ComMUser" as ComMUser #9FA8DA {
+        note right
+            **User Configuration:**
+            
+            **1. ComMUserId**
+            
+            **2. ComMUserMappedChannels**
+            - List of accessible channels
+        end note
+    }
+}
+
+' ============ FILTERING DECISION TREE ============
+rectangle "FILTERING DECISION FLOW" as FilterFlow #FFEBEE {
+    note right
+        **WHEN CAN FRAME ARRIVES:**
+        
+        **Step 1: Hardware Filter (CAN Controller)**
+        ```
+        IF (RxCANID & HW_Mask) != (Code & HW_Mask)
+            → REJECT at silicon
+            → Frame never reaches CPU
+            → No interrupt generated
+        ```
+        
+        **Step 2: CanIf Software Filter**
+        ```
+        IF Frame passed HW filter:
+            FOR each CanIfRxPdu:
+                IF (RxCANID == CanIfRxPduCanId)
+                   AND (RxDLC matches expected)
+                   AND (ID Type matches)
+                    → ACCEPT
+                    → Call PduR_CanIfRxIndication()
+                ELSE
+                    → REJECT
+                    → DET Error (if enabled)
+                    → Frame dropped
+        ```
+        
+        **Step 3: PduR Routing Check**
+        ```
+        IF CanIf accepts:
+            IF PduR routing path exists:
+                IF target module is COM:
+                    → Route to Com_RxIndication()
+                ELSE IF target module is CanTp:
+                    → Route to CanTp_RxIndication()
+            ELSE:
+                → No routing → Drop frame
+        ```
+        
+        **Step 4: COM Signal Extraction**
+        ```
+        IF COM receives I-PDU:
+            FOR each ComSignal in I-PDU:
+                Extract bits based on:
+                - ComBitPosition
+                - ComBitSize
+                - ComSignalEndianness
+                
+                Apply ComFilterAlgorithm:
+                IF signal passes filter:
+                    Update signal buffer
+                    Notify via RTE
+                ELSE:
+                    Discard signal update
+        ```
+        
+        **FRAME NOT IN ECU EXTRACT:**
+        
+        **Scenario: CAN ID 0x456 received, not in ECUEX**
+        
+        **Case A: Homologation (Accept All)**
+        ```
+        HW Filter Mask = 0x000
+        → HW accepts
+        → CanIf checks software filter
+        → No CanIfRxPdu configured for 0x456
+        → CanIf REJECTS
+        → DET: CANIF_E_INVALID_CANID
+        → Frame discarded at CanIf
+        ```
+        
+        **Case B: Production (Strict Filter)**
+        ```
+        HW Filter Mask = 0x7FF
+        Code = 0x123
+        RxID = 0x456
+        
+        (0x456 & 0x7FF) != (0x123 & 0x7FF)
+        → HW REJECTS at silicon
+        → No CPU interrupt
+        → No software processing
+        → Most efficient rejection
+        ```
+        
+        **SECURITY IMPLICATION:**
+        - Unauthorized CAN IDs rejected
+        - Prevents CAN injection attacks
+        - Reduces CPU load from spam frames
+    end note
+}
+
+' ============ CAUSE-EFFECT RELATIONSHIPS ============
+
+' Configuration Input Flow
+CANDB --> ComSignal : "Signal Definitions\n(Name, Size, Position)"
+CANDB --> ComIPdu : "Message Definitions\n(ID, DLC, Cycle Time)"
+ECUEX --> HWFilter : "Accepted CAN IDs\nFiltering Strategy"
+ECUEX --> SWFilter : "Exact ID Mappings"
+OEMReq --> HWFilter : "Security Requirements\nFilter Strictness"
+SysDesc --> ComMChannel : "Network Topology\nChannel Assignment"
+
+' Application to RTE
+SigDef --> SWC : "Data Type\nInitial Values"
+SWC --> RTE : "Port Interface\nData Elements"
+
+' RTE to COM
+RTE --> ComSignal : "Signal Mapping\nCallback Functions"
+RTE --> ComIPdu : "I-PDU Grouping"
+
+' COM Configuration Chain
+ComConfig --> ComSignal : "Timing Base\nGlobal Settings"
+ComSignal --> ComIPdu : "Signal Packing\nBit Position"
+ComIPdu --> ComIPduGroup : "Group Assignment\nMode Management"
+
+' COM to PduR
+ComIPdu --> PduRRouting : "TX/RX PDU IDs\nRouting Paths"
+PduRRouting --> CanIfTxPdu : "TX Routing\n(COM→CanIf)"
+PduRRouting --> SWFilter : "RX Routing\n(CanIf→COM)"
+
+' CanIf Configuration Chain
+CanIfInit --> HWFilter : "HW Object Count\nController Mapping"
+CanIfInit --> SWFilter : "PDU Count\nMemory Allocation"
+HWFilter --> CanHwObject : "HOH Reference\nFilter Parameters"
+SWFilter --> CanIfTxPdu : "TX PDU Config"
+SWFilter --> CanIfCtrl : "Controller Association"
+
+' CanIf to Can Driver
+CanIfCtrl --> CanController : "Controller Reference\nActivation"
+HWFilter --> CanHwObject : "Mailbox Assignment\nHW Filter Config"
+CanIfTxPdu --> CanHwObject : "TX HOH Reference"
+
+' Can Driver Internal
+CanGeneral --> CanController : "Global Settings\nError Detection"
+CanController --> CanHwObject : "Baud Rate\nProcessing Mode"
+
+' ComM to CanIf
+ComMChannel --> CanIfCtrl : "Mode Control\n(Sleep/Active)"
+ComMUser --> ComMChannel : "Communication Request"
+
+' ============ CAUSE-EFFECT ANNOTATIONS ============
+
+note right of HWFilter
+    **CAUSE:** Mask = 0x000 (Homologation)
+    **EFFECT:** All CAN IDs pass HW filter
+    **CPU Load:** HIGH (SW filter all frames)
+    **Security:** LOW (accept everything)
+    
+    **CAUSE:** Mask = 0x7FF (Production)
+    **EFFECT:** Only configured IDs pass
+    **CPU Load:** LOW (reject at silicon)
+    **Security:** HIGH (strict filtering)
+end note
+
+note right of SWFilter
+    **CAUSE:** CAN ID not in CanIfRxPdu list
+    **EFFECT:** Frame rejected at CanIf
+    **DET Error:** CANIF_E_INVALID_CANID
+    **Upper Layers:** Never notified
+    
+    **CAUSE:** DLC mismatch
+    **EFFECT:** Frame rejected
+    **DET Error:** CANIF_E_INVALID_DLC
+end note
+
+note right of ComSignal
+    **CAUSE:** ComFilterAlgorithm = ALWAYS
+    **EFFECT:** Every update processed
+    **RTE:** Notification on every reception
+    
+    **CAUSE:** ComFilterAlgorithm = MASKED_NEW_DIFFERS_MASKED_OLD
+    **EFFECT:** Update only on change
+    **RTE:** Notification only on significant change
+    
+    **CAUSE:** ComTimeout expires
+    **EFFECT:** ComRxDataTimeoutAction triggered
+    **Signal:** Set to InvalidValue or Substitute
+end note
+
+note right of CanController
+    **CAUSE:** Baud rate mismatch (500k vs 250k)
+    **EFFECT:** Bus-off error
+    **Recovery:** Automatic or manual restart
+    
+    **CAUSE:** CanRxProcessing = INTERRUPT
+    **EFFECT:** Immediate frame processing
+    **Latency:** Minimum (microseconds)
+    
+    **CAUSE:** CanRxProcessing = POLLING
+    **EFFECT:** Periodic frame check
+    **Latency:** Up to MainFunction period
+end note
+
+' ============ REAL-WORLD SCENARIOS ============
+
+package "Real-World Configuration Scenarios" as Scenarios #E1F5FE {
+    
+    rectangle "Scenario 1: Production ECU" as Prod #B3E5FC {
+        note right
+            **Requirements:**
+            - Strict security
+            - Low CPU load
+            - Specific message set
+            
+            **Configuration:**
+            - HW Mask: 0x7FF (exact match)
+            - SW Filter: Only ECUEX IDs
+            - COM Filter: TRIGGERED_ON_CHANGE
+            
+            **Result:**
+            - Unknown IDs rejected at HW
+            - 0% CPU waste on invalid frames
+            - Secure against CAN injection
+        end note
+    }
+    
+    rectangle "Scenario 2: Development/Debug ECU" as Debug #B3E5FC {
+        note right
+            **Requirements:**
+            - See all network traffic
+            - Debug unknown messages
+            - Log all activity
+            
+            **Configuration:**
+            - HW Mask: 0x000 (accept all)
+            - SW Filter: All possible IDs configured
+            - DLT logging enabled
+            
+            **Result:**
+            - All frames visible
+            - High CPU load
+            - Full network visibility
+        end note
+    }
+    
+    rectangle "Scenario 3: Gateway ECU" as Gateway #B3E5FC {
+        note right
+            **Requirements:**
+            - Route between CAN buses
+            - Filter specific ID ranges
+            - Translate protocols
+            
+            **Configuration:**
+            - Multiple CanControllers
+            - Range-based HW filters
+            - Complex PduR routing
+            
+            **Example:**
+            - CAN1 to CAN2 routing
+            - HW Mask CAN1: 0x700 (IDs 0x100-0x1FF)
+            - HW Mask CAN2: 0x780 (IDs 0x200-0x27F)
+            - PduR routes between busses
+        end note
+    }
+    
+    rectangle "Scenario 4: CAN-FD Mixed Network" as CANFD #B3E5FC {
+        note right
+            **Requirements:**
+            - Support Classic CAN + CAN-FD
+            - Different baud rates
+            - Fallback mechanism
+            
+            **Configuration:**
+            - CanControllerBaudRate: 500 kbps
+            - CanControllerFdBaudRate: 2 Mbps (data)
+            - CanIdType: STANDARD_FD_CAN
+            - DLC: Up to 64 bytes
+            
+            **HW Filter:**
+            - Must handle FD frame format
+            - Separate filters for Classic/FD
+        end note
+    }
+}
+
+' ============ BIT-LEVEL EXAMPLES ============
+
+rectangle "BIT-LEVEL MASKING EXAMPLES" as BitExamples #FFF9C4 {
+    note right
+        **STANDARD CAN (11-bit) DETAILED:**
+        
+        **Example 1: Accept All**
+        ```
+        Mask:  0x000 = 000 0000 0000
+        Code:  0x123 = 001 0010 0011
+        
+        Incoming: 0x456 = 100 0101 0110
+        Check: (0x456 & 0x000) == (0x123 & 0x000)
+               0x000 == 0x000 → ACCEPT
+        
+        Result: ALL IDs accepted
+        ```
+        
+        **Example 2: Upper 8 Bits**
+        ```
+        Mask:  0x7F8 = 111 1111 1000
+        Code:  0x120 = 001 0010 0000
+        
+        Accepts range: 0x120 - 0x127 (8 IDs)
+        
+        Test 0x123:
+        (0x123 & 0x7F8) == (0x120 & 0x7F8)
+        0x120 == 0x120 → ACCEPT
+        
+        Test 0x128:
+        (0x128 & 0x7F8) == (0x120 & 0x7F8)
+        0x128 == 0x120 → REJECT
+        ```
+        
+        **Example 3: Exact Match (Production)**
+        ```
+        Mask:  0x7FF = 111 1111 1111
+        Code:  0x123 = 001 0010 0011
+        
+        Test 0x123:
+        (0x123 & 0x7FF) == (0x123 & 0x7FF)
+        0x123 == 0x123 → ACCEPT
+        
+        Test 0x124:
+        (0x124 & 0x7FF) == (0x123 & 0x7FF)
+        0x124 == 0x123 → REJECT
+        ```
+        
+        **EXTENDED CAN (29-bit) DETAILED:**
+        
+        **Example 4: J1939 PGN Filtering**
+        ```
+        CAN ID Structure (29-bit):
+        [Priority:3][Reserved:1][DP:1][PF:8][PS:8][SA:8]
+        
+        Filter on PGN (PF+PS = 16 bits):
+        Mask:  0x03FFFF00
+             = 0000 0011 1111 1111 1111 1111 0000 0000
+        
+        Code:  0x0CF00400 (PGN 0xF004)
+        
+        Accepts any SA (Source Address)
+        Filters specific PGN
+        ```
+        
+        **Example 5: Priority + PGN Filter**
+        ```
+        Mask:  0x1FFFFF00
+             = Filters priority + PGN, ignores SA
+        
+        Code:  0x18FF1234
+             = Priority 6, PGN 0xFF12, SA 0x34
+        
+        Accepts: 0x18FF12** (any source address)
+        Rejects: Different priority or PGN
+        ```
+        
+        **HOMOLOGATION SPECIAL CASE:**
+        
+        **Accept Standard + Extended Mixed:**
+        ```
+        Configure TWO hardware objects:
+        
+        HOH1 (Standard):
+        - CanIdType: STANDARD
+        - Mask: 0x000
+        - Accepts: 0x000 - 0x7FF
+        
+        HOH2 (Extended):
+        - CanIdType: EXTENDED
+        - Mask: 0x00000000
+        - Accepts: 0x00000000 - 0x1FFFFFFF
+        
+        Result: ALL frames accepted
+        ```
+    end note
+}
+
+' ============ PARAMETER INTERDEPENDENCIES ============
+
+rectangle "PARAMETER CAUSE-EFFECT CHAINS" as ParamChains #E0F2F1 {
+    note right
+        **Chain 1: Signal Timing**
+        ```
+        CAUSE: ComTxModeTimePeriod = 10 ms
+        → EFFECT: COM triggers every 10 ms
+        
+        CAUSE: ComTxIPduMinimumDelayTime = 5 ms
+        → EFFECT: Even if triggered, wait 5 ms
+        
+        CAUSE: CanControllerBaudRate = 500 kbps
+        → EFFECT: Max throughput ~50 kbps
+        
+        CAUSE: Too many 10ms signals
+        → EFFECT: Bus overload (>80% load)
+        → RESULT: Frame loss, timing violations
+        ```
+        
+        **Chain 2: Filtering Strictness**
+        ```
+        CAUSE: OEM requires ISO 26262 ASIL-D
+        → EFFECT: Strict HW filter (Mask 0x7FF)
+        
+        CAUSE: ECU Extract has 50 IDs
+        → EFFECT: Configure 50 CanIfRxPdu entries
+        
+        CAUSE: Unknown ID 0x999 on bus
+        → EFFECT: Rejected at HW (no interrupt)
+        → RESULT: Zero impact on ASIL-D functions
+        ```
+        
+        **Chain 3: Memory Usage**
+        ```
+        CAUSE: 200 ComSignals configured
+        → EFFECT: COM needs N bytes RAM per signal
+        
+        CAUSE: ComSignalType = UINT8_DYN
+        → EFFECT: Maximum 255 bytes per signal
+        
+        CAUSE: CanIfRxPduReadData = TRUE
+        → EFFECT: Additional buffer memory
+        
+        RESULT: Calculate total RAM:
+        - COM signals: 200 × avg_size
+        - COM I-PDUs: M × 8 bytes
+        - CanIf buffers: P × max_dlc
+        - Total: Ensure fits in RAM budget
+        ```
+        
+        **Chain 4: Diagnostic Access**
+        ```
+        CAUSE: DCM needs CAN communication
+        → EFFECT: CanTp configured for CanId 0x7DF
+        
+        CAUSE: CanTp uses multi-frame
+        → EFFECT: PduR routes TP → COM
+        
+        CAUSE: Diagnostic session active
+        → EFFECT: ComM keeps network awake
+        
+        CAUSE: Network transitions to SLEEP
+        → EFFECT: CanIf rejects TX, DCM queues fail
+        ```
+    end note
+}
+
+' ============ CONFIGURATION TOOL FLOW ============
+
+rectangle "Configuration Tool Workflow" as ToolFlow #F3E5F5 {
+    note right
+        **Step-by-Step Configuration:**
+        
+        **1. Import CAN Database (DBC/ARXML)**
+        - Tool reads messages, signals, IDs
+        - Validates against AUTOSAR schema
+        
+        **2. Generate ECU Extract**
+        - Select relevant messages for this ECU
+        - Tool creates ECUEX file
+        
+        **3. Configure COM Module**
+        - Tool auto-generates:
+          * ComSignal (from DBC signals)
+          * ComIPdu (from DBC messages)
+          * ComIPduGroup (logical grouping)
+        - Manual tuning:
+          * Filters, timeouts, callbacks
+        
+        **4. Configure PduR**
+        - Tool generates routing paths:
+          * COM → CanIf (TX)
+          * CanIf → COM (RX)
+          * COM → CanTp (Diag)
+        
+        **5. Configure CanIf**
+        - Tool generates:
+          * CanIfTxPdu (per TX message)
+          * CanIfRxPdu (per RX message)
+        - Manual: HW filter strategy
+        
+        **6. Configure Can Driver**
+        - Manual configuration:
+          * Baud rate calculation
+          * HW object allocation
+          * Filter mask optimization
+        
+        **7. Generate Code**
+        - Tool produces:
+          * Com_Cfg.c / Com_Cfg.h
+          * PduR_Cfg.c / PduR_Cfg.h
+          * CanIf_Cfg.c / CanIf_Cfg.h
+          * Can_Cfg.c / Can_Cfg.h
+        
+        **8. Integration & Build**
+        - Compile BSW + ASW
+        - Link with RTE glue code
+        
+        **9. Flash & Test**
+        - Load to ECU
+        - Verify with CANoe/CANalyzer
+        
+        **10. Validation**
+        - Check all configured IDs work
+        - Test unauthorized ID rejection
+        - Measure bus load, timing
+    end note
+}
+
+' ============ LEGEND ============
+legend right
+    |= Color Code |= Module/Layer |
+    | <back:#E3F2FD>   </back> | Configuration Inputs |
+    | <back:#E8F5E9>   </back> | Application Layer |
+    | <back:#FFF9C4>   </back> | RTE |
+    | <back:#F3E5F5>   </back> | COM Module |
+    | <back:#DCE775>   </back> | PduR Module |
+    | <back:#FFE082>   </back> | CanIf Module |
+    | <back:#FFCCBC>   </back> | Can Driver |
+    | <back:#C5CAE9>   </back> | ComM |
+    | <back:#E1F5FE>   </back> | Scenarios |
+    | <back:#FFF9C4>   </back> | Examples |
+    | <back:#E0F2F1>   </back> | Dependencies |
+    | <back:#F3E5F5>   </back> | Tool Flow |
+endlegend
+
+@enduml

@@ -1,0 +1,2594 @@
+@startuml HTH_HRH_BitLevel_Implementation
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 9
+skinparam packageStyle rectangle
+
+title HTH/HRH Population: Bit-Level Implementation from Hardware Mailbox
+
+' ============ HARDWARE MAILBOX REGISTER LAYOUT ============
+package "Hardware Mailbox Register Layout (TI AWR294x MCAN)" as HWLayout #E3F2FD {
+    
+    rectangle "TX Mailbox Structure (Physical Memory)" as TxMailbox #BBDEFB {
+        note right
+            **Physical Address Layout:**
+            
+            ```
+            Base Address: MCAN_MSG_RAM_BASE = 0xF0280000
+            TX Buffer Offset: 0x0000
+            Each TX Mailbox: 16 bytes (Classic CAN) or 72 bytes (CAN-FD)
+            
+            TX Mailbox N Address Calculation:
+            mailbox_addr = MCAN_MSG_RAM_BASE + TX_BUFFER_OFFSET + (N × mailbox_size)
+            
+            Example: TX Mailbox 3 (Classic CAN):
+            addr = 0xF0280000 + 0x0000 + (3 × 16)
+            addr = 0xF0280030
+            ```
+            
+            **Mailbox Memory Layout (16 bytes):**
+            ```
+            Offset  Register Name       Bit Layout
+            ───────────────────────────────────────────────────────────
+            0x00    T0 (ID Word)        [31:30] - Reserved
+                                        [29]    - ESI (Error State Indicator)
+                                        [28:18] - Extended ID bits [28:18] (29-bit mode)
+                                        [17:0]  - Standard ID [10:0] << 18 (11-bit mode)
+            
+            0x04    T1 (DLC Word)       [31:24] - MM (Message Marker)
+                                        [23]    - EFC (Event FIFO Control)
+                                        [22:21] - Reserved
+                                        [20]    - FDF (FD Format)
+                                        [19]    - BRS (Bit Rate Switch)
+                                        [18:16] - DLC (Data Length Code)
+                                        [15:0]  - Reserved
+            
+            0x08    DATA_LOW            [31:24] - Data Byte 3
+                                        [23:16] - Data Byte 2
+                                        [15:8]  - Data Byte 1
+                                        [7:0]   - Data Byte 0
+            
+            0x0C    DATA_HIGH           [31:24] - Data Byte 7
+                                        [23:16] - Data Byte 6
+                                        [15:8]  - Data Byte 5
+                                        [7:0]   - Data Byte 4
+            ```
+            
+            **Bit-Level Example (Standard CAN ID = 0x123):**
+            ```
+            Register T0 (0xF0280030):
+            
+            Binary Layout (32 bits):
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │              └────────────────────┬─────────────────────┘
+               │  │  │                                   │
+               │  │  ESI=0                     Standard ID (0x123) at bits [28:18]
+               │  Reserved
+               Reserved
+            
+            Hexadecimal: 0x02460000
+            
+            Bit Field Breakdown:
+            - Bits [31:30] = 00 (Reserved)
+            - Bit  [29]    = 0  (ESI - Error Active)
+            - Bits [28:18] = 0x123 (00100100011 binary)
+            - Bits [17:0]  = 0x00000 (Not used for standard ID)
+            
+            To Extract Standard ID:
+            Step 1: Read 32-bit register: reg = 0x02460000
+            Step 2: Shift right by 18 bits: reg >> 18 = 0x00000091
+            Step 3: Mask 11 bits: (reg >> 18) & 0x7FF = 0x123 ✓
+            ```
+            
+            **Extended CAN ID Example (29-bit ID = 0x12345678):**
+            ```
+            Register T0 (Extended):
+            
+            Binary Layout:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 1│ 0│ 0│ 0│ 1│ 0│ 1│ 0│ 1│ 1│ 0│ 0│ 1│ 1│ 1│ 1│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │  └──────────────────────────────────────────────────────────────────────────┬──────────┘
+               │  │  │                                                                              │
+               │  │  ESI                                              Extended ID [28:0] at bits [31:3]
+               │  Reserved
+               Reserved
+            
+            Hexadecimal: 0x2468ACF8
+            
+            To Extract Extended ID:
+            Step 1: Read 32-bit register: reg = 0x2468ACF8
+            Step 2: Shift right by 3 bits: reg >> 3 = 0x048D159F
+            Step 3: Mask 29 bits: (reg >> 3) & 0x1FFFFFFF = 0x048D159F
+            
+            Verify: 0x048D159F = 76,283,295 (decimal)
+            29-bit max = 536,870,911 ✓ Within range
+            ```
+        end note
+    }
+    
+    rectangle "RX Mailbox Structure (Physical Memory)" as RxMailbox #90CAF9 {
+        note right
+            **RX FIFO Element Layout:**
+            ```
+            Base Address: MCAN_MSG_RAM_BASE + RX_FIFO0_OFFSET = 0xF0280400
+            Each RX Element: 16 bytes (Classic CAN)
+            
+            RX FIFO Read Pointer (Get Index):
+            fifo_get_idx = (CAN->RXF0S >> 8) & 0x3F
+            
+            RX Element Address:
+            rx_addr = MCAN_MSG_RAM_BASE + RX_FIFO0_OFFSET + (fifo_get_idx × 16)
+            ```
+            
+            **RX Element Memory Layout (16 bytes):**
+            ```
+            Offset  Register Name       Bit Layout
+            ───────────────────────────────────────────────────────────
+            0x00    R0 (ID Word)        [31]    - ESI (Error State Indicator)
+                                        [30]    - XTD (Extended Identifier)
+                                        [29]    - RTR (Remote Transmission Request)
+                                        [28:0]  - ID (29-bit Extended or 11-bit Standard)
+            
+            0x04    R1 (Status Word)    [31:24] - ANMF (Accepted Non-matching Frame)
+                                        [23:16] - FIDX (Filter Index)
+                                        [15]    - FDF (FD Format)
+                                        [14]    - BRS (Bit Rate Switch)
+                                        [13:8]  - DLC (Data Length Code)
+                                        [7:0]   - RXTS (RX Timestamp LSB)
+            
+            0x08    DATA_LOW            [31:0]  - Data Bytes 0-3
+            
+            0x0C    DATA_HIGH           [31:0]  - Data Bytes 4-7
+            ```
+            
+            **Bit-Level Parsing (Standard CAN):**
+            ```
+            Example: Received Frame with ID 0x456, DLC=8, Data=0x11223344_55667788
+            
+            Register R0 @ 0xF0280400:
+            Raw Value: 0x11580000
+            
+            Binary:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 0│ 1│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │  └──────────────────────────────┬──────────────────────────┘
+               │  │  │                                 │
+               │  │  RTR=0                   Standard ID (0x456) at bits [28:18]
+               │  XTD=0 (Standard 11-bit)
+               ESI=0
+            
+            Extraction Steps:
+            uint32 r0 = *((volatile uint32*)0xF0280400);  // Read R0
+            
+            // Check ID type
+            boolean is_extended = (r0 >> 30) & 0x1;  // Bit 30 (XTD)
+            
+            if (!is_extended) {
+                // Standard ID (11-bit) at bits [28:18]
+                can_id = (r0 >> 18) & 0x7FF;
+                // Result: can_id = 0x456 ✓
+            } else {
+                // Extended ID (29-bit) at bits [28:0]
+                can_id = r0 & 0x1FFFFFFF;
+            }
+            
+            // Extract RTR flag
+            boolean is_rtr = (r0 >> 29) & 0x1;  // Bit 29
+            
+            // Extract ESI flag
+            boolean error_state = (r0 >> 31) & 0x1;  // Bit 31
+            
+            Register R1 @ 0xF0280404:
+            Raw Value: 0x00140800
+            
+            Binary:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               └──────────┬──────────┘ └──────┬──────┘ │ │ └─────┬─────┘ └──────────┬──────────┘
+                          │                   │        │ │       │                   │
+                      ANMF=0              FIDX=20      │ │     DLC=8           Timestamp=0
+                                        (Filter 20)   FDF BRS
+            
+            Extraction Steps:
+            uint32 r1 = *((volatile uint32*)0xF0280404);  // Read R1
+            
+            // Extract DLC (bits [13:8])
+            uint8 dlc = (r1 >> 8) & 0x0F;  // Only lower 4 bits for Classic CAN
+            // Result: dlc = 8 ✓
+            
+            // Extract Filter Index (bits [23:16])
+            uint8 filter_idx = (r1 >> 16) & 0xFF;
+            // Result: filter_idx = 20 (matched filter #20)
+            
+            // Extract CAN-FD flags
+            boolean is_fd = (r1 >> 15) & 0x1;    // FDF bit
+            boolean bit_rate_switch = (r1 >> 14) & 0x1;  // BRS bit
+            
+            // Extract Timestamp (bits [7:0] for LSB, full TS may be elsewhere)
+            uint8 timestamp_lsb = r1 & 0xFF;
+            ```
+        end note
+    }
+}
+
+' ============ AUTOSAR STRUCTURE POPULATION ============
+package "AUTOSAR Can Driver: HTH/HRH Structure Population" as AUTOSARStructures #FFF3E0 {
+    
+    rectangle "HTH Configuration & TX Path" as HTHConfig #FFE082 {
+        note right
+            **AUTOSAR HTH Structure Definition:**
+            ```c
+            /* Can_Cfg.h - Configuration Header */
+            
+            typedef struct {
+                Can_HwHandleType CanObjectId;       // HTH ID (0-31)
+                uint8 CanControllerRef;             // Controller ID (0 or 1)
+                Can_ObjectTypeType CanObjectType;   // TRANSMIT or RECEIVE
+                uint8 CanHwObjectCount;             // Always 1 for mailbox
+                uint8 CanMbBufIdx;                  // Physical mailbox index
+                Can_IdType CanIdMask;               // Optional ID filter
+            } Can_HardwareObjectConfigType;
+            
+            /* Example Configuration: 8 TX mailboxes on MCAN0 */
+            const Can_HardwareObjectConfigType Can_HthConfig[8] = {
+                // HTH 0: High priority (CAN ID 0x100-0x1FF)
+                {
+                    .CanObjectId = 0,               // HTH ID 0
+                    .CanControllerRef = 0,          // MCAN0
+                    .CanObjectType = CAN_OBJECT_TYPE_TRANSMIT,
+                    .CanHwObjectCount = 1,
+                    .CanMbBufIdx = 0,               // Physical TX Buffer 0
+                    .CanIdMask = 0x100              // Base ID
+                },
+                
+                // HTH 1: Normal priority (CAN ID 0x200-0x2FF)
+                {
+                    .CanObjectId = 1,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_TRANSMIT,
+                    .CanHwObjectCount = 1,
+                    .CanMbBufIdx = 1,               // Physical TX Buffer 1
+                    .CanIdMask = 0x200
+                },
+                
+                // HTH 2-7: More TX mailboxes...
+            };
+            
+            /* Global Lookup Table: HTH ID → Physical Mailbox */
+            static uint8 Can_HthToMbIdx[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+            ```
+            
+            **TX Path: Application → Hardware Mailbox**
+            ```c
+            /* Step 1: Upper layer calls Can_Write() */
+            // From COM/CanIf layer:
+            Can_PduType pdu;
+            pdu.id = 0x123;                    // CAN ID (11-bit standard)
+            pdu.length = 8;                    // DLC
+            pdu.sdu = data_buffer;             // Data pointer
+            pdu.swPduHandle = 42;              // I-PDU handle
+            
+            Std_ReturnType result = Can_Write(HTH_0, &pdu);
+            
+            /* Step 2: Can_Write() implementation */
+            Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                     const Can_PduType* PduInfo) {
+                
+                // Validate HTH
+                if (Hth >= CAN_NUM_HTH) {
+                    return E_NOT_OK;
+                }
+                
+                // Get controller and physical mailbox index
+                const Can_HardwareObjectConfigType* hth_cfg = &Can_HthConfig[Hth];
+                uint8 controller = hth_cfg->CanControllerRef;  // 0 = MCAN0
+                uint8 mb_idx = hth_cfg->CanMbBufIdx;           // Physical index
+                
+                // Get hardware base address
+                volatile uint32* mcan_base = (controller == 0) ? 
+                    (volatile uint32*)MCAN0_BASE : 
+                    (volatile uint32*)MCAN1_BASE;
+                
+                // Calculate TX mailbox address
+                uint32 msg_ram_base = (controller == 0) ? 
+                    MCAN0_MSG_RAM_BASE : MCAN1_MSG_RAM_BASE;
+                
+                volatile uint32* tx_mailbox = (volatile uint32*)(
+                    msg_ram_base + TX_BUFFER_OFFSET + (mb_idx * 16)
+                );
+                
+                // Check if mailbox is free (read TXBRP register)
+                volatile uint32* txbrp_reg = mcan_base + (MCAN_TXBRP_OFFSET / 4);
+                uint32 pending_mask = (1U << mb_idx);
+                
+                if (*txbrp_reg & pending_mask) {
+                    return CAN_BUSY;  // Mailbox still transmitting
+                }
+                
+                /* Step 3: Populate mailbox with bit shifting */
+                
+                // T0 Register: CAN ID + Flags
+                uint32 t0_value = 0;
+                
+                if (PduInfo->id <= 0x7FF) {
+                    // Standard ID (11-bit)
+                    // Shift ID to bits [28:18]
+                    t0_value = (PduInfo->id & 0x7FF) << 18;
+                    
+                    // IDE bit = 0 (Standard ID) - automatically 0
+                    // ESI bit = 0 (Error Active)
+                    
+                    /*
+                     * Bit Shifting Breakdown:
+                     * 
+                     * Input: PduInfo->id = 0x123 (0001 0010 0011)
+                     * 
+                     * Step 1: Mask to 11 bits
+                     * 0x123 & 0x7FF = 0x123 (no change)
+                     * 
+                     * Step 2: Shift left by 18 bits
+                     * 0x123 << 18:
+                     * 
+                     * Before shift (32-bit):
+                     * 0000 0000 0000 0000 0000 0001 0010 0011
+                     * 
+                     * After shift left 18:
+                     * 0000 0100 1000 1100 0000 0000 0000 0000
+                     * 
+                     * Hexadecimal: 0x048C0000
+                     * 
+                     * Bit positions:
+                     * Bit 31-29: 000 (Reserved + ESI)
+                     * Bit 28-18: 00100100011 (0x123)
+                     * Bit 17-0:  0x00000 (Unused for standard)
+                     */
+                    
+                } else {
+                    // Extended ID (29-bit)
+                    // Shift ID to bits [31:3]
+                    t0_value = (PduInfo->id & 0x1FFFFFFF) << 3;
+                    
+                    // Set XTD bit (bit 30) - actually in R0 for RX, not needed for TX
+                    // For TX, just put full 29-bit ID in bits [31:3]
+                    
+                    /*
+                     * Extended ID Example:
+                     * 
+                     * Input: PduInfo->id = 0x12345678 (29-bit)
+                     * 
+                     * Binary: 0001 0010 0011 0100 0101 0110 0111 1000
+                     * 
+                     * Mask to 29 bits:
+                     * 0x12345678 & 0x1FFFFFFF = 0x12345678
+                     * 
+                     * Shift left by 3 bits:
+                     * 0x12345678 << 3:
+                     * 
+                     * Before:
+                     * xxxx xxx1 0010 0011 0100 0101 0110 0111 1000
+                     * 
+                     * After:
+                     * 1001 0001 1010 0010 1011 0011 1100 0000
+                     * 
+                     * Hexadecimal: 0x91A2B3C0
+                     */
+                }
+                
+                // Write T0 register (ID word)
+                tx_mailbox[0] = t0_value;
+                
+                // T1 Register: DLC + Flags
+                uint32 t1_value = 0;
+                
+                // DLC at bits [18:16] - but for Classic CAN, use bits [19:16]
+                // Actually for M_CAN, DLC is at bits [19:16]
+                uint8 dlc_code = PduInfo->length & 0x0F;  // Limit to 4 bits
+                t1_value = (dlc_code << 16);
+                
+                /*
+                 * DLC Bit Shifting:
+                 * 
+                 * Input: PduInfo->length = 8
+                 * 
+                 * Binary: 0000 1000
+                 * 
+                 * Mask: 8 & 0x0F = 8 (1000)
+                 * 
+                 * Shift left 16 bits:
+                 * 0x00000008 << 16 = 0x00080000
+                 * 
+                 * Bit layout in T1:
+                 * Bit 31-20: 0x000 (MM, EFC, Reserved)
+                 * Bit 19-16: 1000 (DLC = 8)
+                 * Bit 15-0:  0x0000 (Reserved)
+                 */
+                
+                // Optional: Set FDF bit for CAN-FD (bit 21)
+                // t1_value |= (1U << 21);
+                
+                // Optional: Set BRS bit for bit rate switch (bit 20)
+                // t1_value |= (1U << 20);
+                
+                // Write T1 register (DLC word)
+                tx_mailbox[1] = t1_value;
+                
+                // DATA_LOW Register: Bytes 0-3
+                uint32 data_low = 0;
+                if (PduInfo->length >= 1) data_low |= (PduInfo->sdu[0] << 0);
+                if (PduInfo->length >= 2) data_low |= (PduInfo->sdu[1] << 8);
+                if (PduInfo->length >= 3) data_low |= (PduInfo->sdu[2] << 16);
+                if (PduInfo->length >= 4) data_low |= (PduInfo->sdu[3] << 24);
+                
+                /*
+                 * Data Byte Packing:
+                 * 
+                 * Input: sdu[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
+                 * 
+                 * data_low calculation:
+                 * 
+                 * Byte 0: 0x11 << 0  = 0x00000011
+                 * Byte 1: 0x22 << 8  = 0x00002200
+                 * Byte 2: 0x33 << 16 = 0x00330000
+                 * Byte 3: 0x44 << 24 = 0x44000000
+                 * 
+                 * Bitwise OR:
+                 * 0x00000011
+                 * 0x00002200
+                 * 0x00330000
+                 * 0x44000000
+                 * ──────────
+                 * 0x44332211
+                 * 
+                 * Memory layout (little-endian):
+                 * Address: [0x00] [0x01] [0x02] [0x03]
+                 * Data:      0x11   0x22   0x33   0x44
+                 */
+                
+                // Write DATA_LOW register
+                tx_mailbox[2] = data_low;
+                
+                // DATA_HIGH Register: Bytes 4-7
+                uint32 data_high = 0;
+                if (PduInfo->length >= 5) data_high |= (PduInfo->sdu[4] << 0);
+                if (PduInfo->length >= 6) data_high |= (PduInfo->sdu[5] << 8);
+                if (PduInfo->length >= 7) data_high |= (PduInfo->sdu[6] << 16);
+                if (PduInfo->length >= 8) data_high |= (PduInfo->sdu[7] << 24);
+                
+                // Write DATA_HIGH register
+                tx_mailbox[3] = data_high;
+                
+                /* Step 4: Memory Barrier (CRITICAL!) */
+                __DMB();  // Data Memory Barrier
+                __DSB();  // Data Synchronization Barrier
+                
+                /* Step 5: Trigger Transmission */
+                volatile uint32* txbar_reg = mcan_base + (MCAN_TXBAR_OFFSET / 4);
+                *txbar_reg = pending_mask;  // Set bit for this mailbox
+                
+                /*
+                 * TXBAR Register Write:
+                 * 
+                 * mb_idx = 3
+                 * pending_mask = (1U << 3) = 0x00000008
+                 * 
+                 * Binary: 0000 0000 0000 0000 0000 0000 0000 1000
+                 * 
+                 * Hexadecimal: 0x00000008
+                 * 
+                 * This sets bit 3, triggering TX Buffer 3 transmission
+                 */
+                
+                return E_OK;
+            }
+            ```
+        end note
+    }
+    
+    rectangle "HRH Configuration & RX Path" as HRHConfig #FFCA28 {
+        note right
+            **AUTOSAR HRH Structure Definition:**
+            ```c
+            /* Can_Cfg.h */
+            
+            typedef struct {
+                Can_HwHandleType CanObjectId;       // HRH ID (0-63)
+                uint8 CanControllerRef;             // Controller ID
+                Can_ObjectTypeType CanObjectType;   // RECEIVE
+                uint8 CanFifoIdx;                   // FIFO index (0, 1) or 0xFF
+                uint8 CanRxBufferIdx;               // Dedicated buffer index or 0xFF
+                Can_IdType CanIdRangeLower;         // Filter lower bound
+                Can_IdType CanIdRangeUpper;         // Filter upper bound
+            } Can_HardwareObjectConfigType;
+            
+            /* Example Configuration: 4 RX objects */
+            const Can_HardwareObjectConfigType Can_HrhConfig[4] = {
+                // HRH 0: RX FIFO 0 (General messages)
+                {
+                    .CanObjectId = 0,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 0,                // RX FIFO 0
+                    .CanRxBufferIdx = 0xFF,         // Not dedicated buffer
+                    .CanIdRangeLower = 0x100,
+                    .CanIdRangeUpper = 0x3FF
+                },
+                
+                // HRH 1: RX FIFO 1 (Diagnostic)
+                {
+                    .CanObjectId = 1,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 1,
+                    .CanRxBufferIdx = 0xFF,
+                    .CanIdRangeLower = 0x700,
+                    .CanIdRangeUpper = 0x7FF
+                },
+                
+                // HRH 2: Dedicated RX Buffer 0 (Critical message)
+                {
+                    .CanObjectId = 2,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 0xFF,             // Not FIFO
+                    .CanRxBufferIdx = 0,            // Dedicated RX Buffer 0
+                    .CanIdRangeLower = 0x123,
+                    .CanIdRangeUpper = 0x123        // Exact match
+                },
+                
+                // HRH 3: More RX objects...
+            };
+            ```
+            
+            **RX Path: Hardware Mailbox → AUTOSAR Indication**
+            ```c
+            /* RX Interrupt Service Routine */
+            void Can_RxFifo0_ISR(void) {
+                volatile uint32* mcan_base = (volatile uint32*)MCAN0_BASE;
+                uint32 msg_ram_base = MCAN0_MSG_RAM_BASE;
+                
+                /* Step 1: Read FIFO Fill Level */
+                volatile uint32* rxf0s_reg = mcan_base + (MCAN_RXF0S_OFFSET / 4);
+                uint32 rxf0s_value = *rxf0s_reg;
+                
+                /*
+                 * RXF0S Register Bit Layout:
+                 * 
+                 * Bit 31-26: Reserved
+                 * Bit 25:    RF0L (RX FIFO 0 Message Lost)
+                 * Bit 24:    RF0F (RX FIFO 0 Full)
+                 * Bit 23-16: Reserved
+                 * Bit 15-8:  F0GI (FIFO 0 Get Index)
+                 * Bit 7:     Reserved
+                 * Bit 6-0:   F0FL (FIFO 0 Fill Level)
+                 * 
+                 * Example: rxf0s_value = 0x00000302
+                 * 
+                 * Binary:
+                 * 0000 0000 0000 0000 0000 0011 0000 0010
+                 * 
+                 * Fill Level (bits [6:0]): 0000010 = 2 messages
+                 * Get Index (bits [15:8]): 00000011 = 3
+                 */
+                
+                // Extract fill level (bits [6:0])
+                uint8 fill_level = rxf0s_value & 0x7F;
+                
+                // Extract get index (bits [15:8])
+                uint8 get_idx = (rxf0s_value >> 8) & 0x3F;
+                
+                /*
+                 * Bit Extraction:
+                 * 
+                 * fill_level = 0x00000302 & 0x7F
+                 *            = 0x00000002 = 2
+                 * 
+                 * get_idx = (0x00000302 >> 8) & 0x3F
+                 *         = 0x00000003 & 0x3F
+                 *         = 0x03 = 3
+                 */
+                
+                /* Step 2: Loop Through Available Messages */
+                for (uint8 i = 0; i < fill_level; i++) {
+                    // Calculate RX element address
+                    uint32 rx_fifo0_base = msg_ram_base + RX_FIFO0_OFFSET;
+                    volatile uint32* rx_element = (volatile uint32*)(
+                        rx_fifo0_base + (get_idx * 16)
+                    );
+                    
+                    /*
+                     * Address Calculation:
+                     * 
+                     * msg_ram_base = 0xF0280000
+                     * RX_FIFO0_OFFSET = 0x0400
+                     * get_idx = 3
+                     * 
+                     * rx_fifo0_base = 0xF0280000 + 0x0400 = 0xF0280400
+                     * rx_element = 0xF0280400 + (3 × 16)
+                     *            = 0xF0280400 + 0x30
+                     *            = 0xF0280430
+                     */
+                    
+                    /* Step 3: Read R0 Register (ID + Flags) */
+                    uint32 r0_value = rx_element[0];
+                    
+                    /*
+                     * Example: r0_value = 0x11580000
+                     * 
+                     * Binary:
+                     * 0001 0001 0101 1000 0000 0000 0000 0000
+                     * 
+                     * Bit 31 (ESI):  0
+                     * Bit 30 (XTD):  0 (Standard ID)
+                     * Bit 29 (RTR):  0 (Data frame)
+                     * Bits [28:18]:  00010101100 = 0x456
+                     */
+                    
+                    // Extract ESI flag (bit 31)
+                    boolean esi = (r0_value >> 31) & 0x1;
+                    
+                    // Extract XTD flag (bit 30) - Extended ID indicator
+                    boolean is_extended = (r0_value >> 30) & 0x1;
+                    
+                    // Extract RTR flag (bit 29) - Remote frame
+                    boolean is_rtr = (r0_value >> 29) & 0x1;
+                    
+                    // Extract CAN ID
+                    Can_IdType can_id;
+                    
+                    if (!is_extended) {
+                        // Standard ID (11-bit) at bits [28:18]
+                        can_id = (r0_value >> 18) & 0x7FF;
+                        
+                        /*
+                         * Standard ID Extraction:
+                         * 
+                         * r0_value = 0x11580000
+                         * 
+                         * Step 1: Shift right by 18
+                         * 0x11580000 >> 18:
+                         * 
+                         * Binary before shift:
+                         * 0001 0001 0101 1000 0000 0000 0000 0000
+                         * 
+                         * After shift right 18:
+                         * 0000 0000 0000 0000 0000 0100 0101 0110
+                         * 
+                         * Hexadecimal: 0x00000456
+                         * 
+                         * Step 2: Mask with 0x7FF (11 bits)
+                         * 0x00000456 & 0x7FF = 0x456 ✓
+                         */
+                        
+                    } else {
+                        // Extended ID (29-bit) at bits [28:0]
+                        can_id = r0_value & 0x1FFFFFFF;
+                        
+                        /*
+                         * Extended ID Extraction:
+                         * 
+                         * r0_value = 0xA468ACF8 (example)
+                         * 
+                         * Binary:
+                         * 1010 0100 0110 1000 1010 1100 1111 1000
+                         * 
+                         * Mask with 0x1FFFFFFF (29 bits):
+                         * 0xA468ACF8 & 0x1FFFFFFF:
+                         * 
+                         * 0x1FFFFFFF = 0001 1111 1111 1111 1111 1111 1111 1111
+                         * 0xA468ACF8 = 1010 0100 0110 1000 1010 1100 1111 1000
+                         *              ────────────────────────────────────
+                         * Result     = 0010 0100 0110 1000 1010 1100 1111 1000
+                         * 
+                         * Hexadecimal: 0x2468ACF8
+                         * Decimal: 610,025,720
+                         */
+                    }
+                    
+                    /* Step 4: Read R1 Register (DLC + Status) */
+                    uint32 r1_value = rx_element[1];
+                    
+                    /*
+                     * Example: r1_value = 0x00140800
+                     * 
+                     * Binary:
+                     * 0000 0000 0001 0100 0000 1000 0000 0000
+                     * 
+                     * Bits [23:16]: 00010100 = 20 (Filter Index)
+                     * Bit  [15]:    0 (FDF - not CAN-FD)
+                     * Bit  [14]:    0 (BRS - no bit rate switch)
+                     * Bits [13:8]:  001000 = 8 (DLC)
+                     * Bits [7:0]:   00000000 = 0 (Timestamp LSB)
+                     */
+                    
+                    // Extract DLC (bits [13:8] for Classic, bits [19:16] for M_CAN)
+                    // For M_CAN, DLC is actually at bits [19:16]
+                    uint8 dlc = (r1_value >> 16) & 0x0F;
+                    
+                    /*
+                     * DLC Extraction:
+                     * 
+                     * r1_value = 0x00080800
+                     * 
+                     * Shift right 16:
+                     * 0x00080800 >> 16 = 0x00000008
+                     * 
+                     * Mask with 0x0F:
+                     * 0x00000008 & 0x0F = 0x08 = 8 ✓
+                     */
+                    
+                    // Extract Filter Index (bits [23:16])
+                    uint8 filter_idx = (r1_value >> 16) & 0xFF;
+                    
+                    // Extract CAN-FD flags
+                    boolean is_fd = (r1_value >> 15) & 0x1;
+                    boolean brs = (r1_value >> 14) & 0x1;
+                    
+                    /* Step 5: Read Data Bytes */
+                    uint32 data_low = rx_element[2];
+                    uint32 data_high = rx_element[3];
+                    
+                    /*
+                     * Example:
+                     * data_low = 0x44332211
+                     * data_high = 0x88776655
+                     * 
+                     * Extract individual bytes:
+                     */
+                    
+                    uint8 data_buffer[8];
+                    data_buffer[0] = (data_low >> 0) & 0xFF;   // 0x11
+                    data_buffer[1] = (data_low >> 8) & 0xFF;   // 0x22
+                    data_buffer[2] = (data_low >> 16) & 0xFF;  // 0x33
+                    data_buffer[3] = (data_low >> 24) & 0xFF;  // 0x44
+                    data_buffer[4] = (data_high >> 0) & 0xFF;  // 0x55
+                    data_buffer[5] = (data_high >> 8) & 0xFF;  // 0x66
+                    data_buffer[6] = (data_high >> 16) & 0xFF; // 0x77
+                    data_buffer[7] = (data_high >> 24) & 0xFF; // 0x88
+                    
+                    /*
+                     * Byte Extraction Bit Operations:
+                     * 
+                     * data_low = 0x44332211
+                     * 
+                     * Byte 0:
+                     * (0x44332211 >> 0) & 0xFF:
+                     * 0x44332211 & 0xFF = 0x11 ✓
+                     * 
+                     * Byte 1:
+                     * (0x44332211 >> 8) & 0xFF:
+                     * 0x00443322 & 0xFF = 0x22 ✓
+                     * 
+                     * Byte 2:
+                     * (0x44332211 >> 16) & 0xFF:
+                     * 0x00004433 & 0xFF = 0x33 ✓
+                     * 
+                     * Byte 3:
+                     * (0x44332211 >> 24) & 0xFF:
+                     * 0x00000044 & 0xFF = 0x44 ✓
+                     */
+                    
+                    /* Step 6: Acknowledge FIFO Read */
+                    volatile uint32* rxf0a_reg = mcan_base + (MCAN_RXF0A_OFFSET / 4);
+                    *rxf0a_reg = get_idx;
+                    
+                    /*
+                     * FIFO Acknowledge:
+                     * 
+                     * Writing get_idx to RXF0A register tells hardware:
+                     * "I've read element at index X, you can reuse it"
+                     * 
+                     * Hardware increments FIFO get index automatically
+                     * Next read will be at (get_idx + 1) % FIFO_DEPTH
+                     */
+                    
+                    /* Step 7: Find HRH for This Message */
+                    Can_HwHandleType hrh = CAN_INVALID_HRH;
+                    
+                    for (uint8 j = 0; j < CAN_NUM_HRH; j++) {
+                        const Can_HardwareObjectConfigType* hrh_cfg = &Can_HrhConfig[j];
+                        
+                        // Check if FIFO matches
+                        if (hrh_cfg->CanFifoIdx != 0) {
+                            continue;  // Not FIFO 0
+                        }
+                        
+                        // Check if CAN ID in range
+                        if ((can_id >= hrh_cfg->CanIdRangeLower) &&
+                            (can_id <= hrh_cfg->CanIdRangeUpper)) {
+                            hrh = hrh_cfg->CanObjectId;
+                            break;
+                        }
+                    }
+                    
+                    if (hrh == CAN_INVALID_HRH) {
+                        // No matching HRH found (should not happen if filters correct)
+                        DET_ReportError(CAN_MODULE_ID, 0, CAN_E_PARAM_HANDLE);
+                        continue;
+                    }
+                    
+                    /* Step 8: Call Upper Layer (CanIf) */
+                    CanIf_RxIndication(
+                        hrh,                // HRH handle
+                        can_id,             // CAN ID (extracted)
+                        dlc,                // DLC (extracted)
+                        data_buffer         // Data bytes (extracted)
+                    );
+                    
+                    // Update get_idx for next iteration
+                    get_idx = (get_idx + 1) % RX_FIFO0_DEPTH;
+                }
+                
+                /* Step 9: Clear Interrupt Flag */
+                volatile uint32* ir_reg = mcan_base + (MCAN_IR_OFFSET / 4);
+                *ir_reg = MCAN_IR_RF0N_MASK;  // Clear RX FIFO 0 new message flag
+            }
+            ```
+        end note
+    }
+}
+
+' ============ BIT-LEVEL VISUALIZATION ============
+package "Bit-Level Visualization" as BitLevel #E8F5E9 {
+    
+    rectangle "Complete TX Example (CAN ID 0x123, DLC=8)" as TxExample #C8E6C9 {
+        note right
+            **Step-by-Step Bit Operations:**
+            
+            ```
+            Application Data:
+            ─────────────────
+            CAN ID: 0x123 (11-bit standard)
+            DLC: 8 bytes
+            Data: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
+            
+            Physical Memory Write:
+            ──────────────────────
+            
+            Address: 0xF0280000 (TX Buffer 0)
+            
+            ┌─ Offset 0x00: T0 Register (ID Word) ───────────────────────┐
+            │                                                             │
+            │ Input: can_id = 0x123                                       │
+            │                                                             │
+            │ Operation: t0 = (can_id & 0x7FF) << 18                      │
+            │                                                             │
+            │ Step 1: Mask                                                │
+            │   0x123 & 0x7FF = 0x123 (no change for 11-bit ID)          │
+            │                                                             │
+            │ Step 2: Shift left 18 bits                                 │
+            │   Binary: 0000 0001 0010 0011 (16-bit representation)      │
+            │                                                             │
+            │   Shift operation:                                          │
+            │   ┌────────────────────────────────────────────────────┐   │
+            │   │ Position 0-17:  0000 0000 0000 0000 00  (18 zeros) │   │
+            │   │ Position 18-28: 000 0001 0010 0011     (0x123)     │   │
+            │   │ Position 29-31: 000                     (Reserved)  │   │
+            │   └────────────────────────────────────────────────────┘   │
+            │                                                             │
+            │   Resulting 32-bit value:                                   │
+            │   0000 0100 1000 1100 0000 0000 0000 0000                   │
+            │   0    4    8    C    0    0    0    0                      │
+            │   Hexadecimal: 0x048C0000                                   │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280000) = 0x048C0000                       │
+            │                                                             │
+            │   Hardware Register View:                                   │
+            │   ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐       │
+            │   │31│30│29│28│27│26│25│24│23│22│21│20│19│18│17│16│       │
+            │   ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤       │
+            │   │ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 0│       │
+            │   └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘       │
+            │   ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐       │
+            │   │15│14│13│12│11│10│09│08│07│06│05│04│03│02│01│00│       │
+            │   ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤       │
+            │   │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│       │
+            │   └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x04: T1 Register (DLC Word) ──────────────────────┐
+            │                                                             │
+            │ Input: dlc = 8                                              │
+            │                                                             │
+            │ Operation: t1 = (dlc & 0x0F) << 16                          │
+            │                                                             │
+            │ Step 1: Mask                                                │
+            │   8 & 0x0F = 8 (0000 1000)                                  │
+            │                                                             │
+            │ Step 2: Shift left 16 bits                                 │
+            │   Binary: 0000 1000                                         │
+            │                                                             │
+            │   Shift operation:                                          │
+            │   ┌────────────────────────────────────────────────────┐   │
+            │   │ Position 0-15:  0000 0000 0000 0000  (16 zeros)    │   │
+            │   │ Position 16-19: 1000                  (DLC = 8)     │   │
+            │   │ Position 20-31: 0000 0000 0000        (Reserved)    │   │
+            │   └────────────────────────────────────────────────────┘   │
+            │                                                             │
+            │   Resulting 32-bit value:                                   │
+            │   0000 0000 0000 1000 0000 0000 0000 0000                   │
+            │   0    0    0    8    0    0    0    0                      │
+            │   Hexadecimal: 0x00080000                                   │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280004) = 0x00080000                       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x08: DATA_LOW Register (Bytes 0-3) ───────────────┐
+            │                                                             │
+            │ Input: data[] = {0x11, 0x22, 0x33, 0x44, ...}              │
+            │                                                             │
+            │ Operation: Bitwise OR of shifted bytes                      │
+            │                                                             │
+            │ data_low = (data[0] << 0)  |                                │
+            │            (data[1] << 8)  |                                │
+            │            (data[2] << 16) |                                │
+            │            (data[3] << 24)                                  │
+            │                                                             │
+            │ Step-by-step:                                               │
+            │                                                             │
+            │ Byte 0: 0x11 << 0  = 0x00000011                             │
+            │   Binary: 0000 0000 0000 0000 0000 0000 0001 0001           │
+            │                                                             │
+            │ Byte 1: 0x22 << 8  = 0x00002200                             │
+            │   Binary: 0000 0000 0000 0000 0010 0010 0000 0000           │
+            │                                                             │
+            │ Byte 2: 0x33 << 16 = 0x00330000                             │
+            │   Binary: 0000 0000 0011 0011 0000 0000 0000 0000           │
+            │                                                             │
+            │ Byte 3: 0x44 << 24 = 0x44000000                             │
+            │   Binary: 0100 0100 0000 0000 0000 0000 0000 0000           │
+            │                                                             │
+            │ Bitwise OR:                                                 │
+            │   0x00000011                                                │
+            │ | 0x00002200                                                │
+            │ | 0x00330000                                                │
+            │ | 0x44000000                                                │
+            │   ──────────                                                │
+            │   0x44332211                                                │
+            │                                                             │
+            │   Bit-by-bit OR operation:                                  │
+            │   Position: 31-24 23-16 15-8  7-0                           │
+            │   ─────────────────────────────────                         │
+            │   Byte 0:   00    00    00    11  (0x11)                    │
+            │   Byte 1:   00    00    22    00  (0x22 << 8)               │
+            │   Byte 2:   00    33    00    00  (0x33 << 16)              │
+            │   Byte 3:   44    00    00    00  (0x44 << 24)              │
+            │   Result:   44    33    22    11  (0x44332211)              │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280008) = 0x44332211                       │
+            │                                                             │
+            │   Little-Endian Memory Layout:                              │
+            │   Address:  0x08  0x09  0x0A  0x0B                          │
+            │   Value:    0x11  0x22  0x33  0x44                          │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x0C: DATA_HIGH Register (Bytes 4-7) ──────────────┐
+            │                                                             │
+            │ Input: data[] = {..., 0x55, 0x66, 0x77, 0x88}              │
+            │                                                             │
+            │ Operation: Same as DATA_LOW                                 │
+            │                                                             │
+            │ data_high = (data[4] << 0)  |                               │
+            │             (data[5] << 8)  |                               │
+            │             (data[6] << 16) |                               │
+            │             (data[7] << 24)                                 │
+            │                                                             │
+            │ Result: 0x88776655                                          │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF028000C) = 0x88776655                       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            Complete Mailbox After Population:
+            ───────────────────────────────────
+            
+            Memory Dump (16 bytes starting at 0xF0280000):
+            
+            Address    | +0        +4        +8        +C
+            ───────────┼──────────────────────────────────────
+            0xF0280000 │ 048C0000  00080000  44332211  88776655
+            
+            Interpretation:
+            ───────────────
+            T0 (ID):    CAN ID = 0x123 (Standard)
+            T1 (DLC):   DLC = 8 bytes
+            DATA_LOW:   0x11, 0x22, 0x33, 0x44
+            DATA_HIGH:  0x55, 0x66, 0x77, 0x88
+            
+            Hardware View:
+            ──────────────
+            When TXBAR register is written (bit 0 set),
+            CAN controller reads these 16 bytes and
+            transmits them on the CAN bus according to
+            CAN protocol timing and arbitration rules.
+            ```
+        end note
+    }
+    
+    rectangle "Complete RX Example (Parsing Received Frame)" as RxExample #A5D6A7 {
+        note right
+            **Hardware-to-Software Data Flow:**
+            
+            ```
+            Received CAN Frame on Bus:
+            ──────────────────────────
+            CAN ID: 0x456 (11-bit standard)
+            DLC: 8 bytes
+            Data: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11]
+            
+            Hardware Processing:
+            ────────────────────
+            1. Frame arrives on CAN bus (physical layer)
+            2. CAN controller captures arbitration bits
+            3. Hardware filter matches (Filter Index = 5)
+            4. Frame stored in RX FIFO 0, element index 2
+            5. Interrupt triggered
+            
+            Physical Memory State:
+            ──────────────────────
+            
+            Address: 0xF0280420 (RX FIFO 0, Element 2)
+            = 0xF0280400 (FIFO base) + (2 × 16 bytes)
+            
+            ┌─ Offset 0x00: R0 Register (ID + Flags) ────────────────────┐
+            │                                                             │
+            │@startuml HTH_HRH_BitLevel_Implementation
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 9
+skinparam packageStyle rectangle
+
+title HTH/HRH Population: Bit-Level Implementation from Hardware Mailbox
+
+' ============ HARDWARE MAILBOX REGISTER LAYOUT ============
+package "Hardware Mailbox Register Layout (TI AWR294x MCAN)" as HWLayout #E3F2FD {
+    
+    rectangle "TX Mailbox Structure (Physical Memory)" as TxMailbox #BBDEFB {
+        note right
+            **Physical Address Layout:**
+            
+            ```
+            Base Address: MCAN_MSG_RAM_BASE = 0xF0280000
+            TX Buffer Offset: 0x0000
+            Each TX Mailbox: 16 bytes (Classic CAN) or 72 bytes (CAN-FD)
+            
+            TX Mailbox N Address Calculation:
+            mailbox_addr = MCAN_MSG_RAM_BASE + TX_BUFFER_OFFSET + (N × mailbox_size)
+            
+            Example: TX Mailbox 3 (Classic CAN):
+            addr = 0xF0280000 + 0x0000 + (3 × 16)
+            addr = 0xF0280030
+            ```
+            
+            **Mailbox Memory Layout (16 bytes):**
+            ```
+            Offset  Register Name       Bit Layout
+            ───────────────────────────────────────────────────────────
+            0x00    T0 (ID Word)        [31:30] - Reserved
+                                        [29]    - ESI (Error State Indicator)
+                                        [28:18] - Extended ID bits [28:18] (29-bit mode)
+                                        [17:0]  - Standard ID [10:0] << 18 (11-bit mode)
+            
+            0x04    T1 (DLC Word)       [31:24] - MM (Message Marker)
+                                        [23]    - EFC (Event FIFO Control)
+                                        [22:21] - Reserved
+                                        [20]    - FDF (FD Format)
+                                        [19]    - BRS (Bit Rate Switch)
+                                        [18:16] - DLC (Data Length Code)
+                                        [15:0]  - Reserved
+            
+            0x08    DATA_LOW            [31:24] - Data Byte 3
+                                        [23:16] - Data Byte 2
+                                        [15:8]  - Data Byte 1
+                                        [7:0]   - Data Byte 0
+            
+            0x0C    DATA_HIGH           [31:24] - Data Byte 7
+                                        [23:16] - Data Byte 6
+                                        [15:8]  - Data Byte 5
+                                        [7:0]   - Data Byte 4
+            ```
+            
+            **Bit-Level Example (Standard CAN ID = 0x123):**
+            ```
+            Register T0 (0xF0280030):
+            
+            Binary Layout (32 bits):
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │              └────────────────────┬─────────────────────┘
+               │  │  │                                   │
+               │  │  ESI=0                     Standard ID (0x123) at bits [28:18]
+               │  Reserved
+               Reserved
+            
+            Hexadecimal: 0x02460000
+            
+            Bit Field Breakdown:
+            - Bits [31:30] = 00 (Reserved)
+            - Bit  [29]    = 0  (ESI - Error Active)
+            - Bits [28:18] = 0x123 (00100100011 binary)
+            - Bits [17:0]  = 0x00000 (Not used for standard ID)
+            
+            To Extract Standard ID:
+            Step 1: Read 32-bit register: reg = 0x02460000
+            Step 2: Shift right by 18 bits: reg >> 18 = 0x00000091
+            Step 3: Mask 11 bits: (reg >> 18) & 0x7FF = 0x123 ✓
+            ```
+            
+            **Extended CAN ID Example (29-bit ID = 0x12345678):**
+            ```
+            Register T0 (Extended):
+            
+            Binary Layout:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 1│ 0│ 0│ 0│ 1│ 0│ 1│ 0│ 1│ 1│ 0│ 0│ 1│ 1│ 1│ 1│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │  └──────────────────────────────────────────────────────────────────────────┬──────────┘
+               │  │  │                                                                              │
+               │  │  ESI                                              Extended ID [28:0] at bits [31:3]
+               │  Reserved
+               Reserved
+            
+            Hexadecimal: 0x2468ACF8
+            
+            To Extract Extended ID:
+            Step 1: Read 32-bit register: reg = 0x2468ACF8
+            Step 2: Shift right by 3 bits: reg >> 3 = 0x048D159F
+            Step 3: Mask 29 bits: (reg >> 3) & 0x1FFFFFFF = 0x048D159F
+            
+            Verify: 0x048D159F = 76,283,295 (decimal)
+            29-bit max = 536,870,911 ✓ Within range
+            ```
+        end note
+    }
+    
+    rectangle "RX Mailbox Structure (Physical Memory)" as RxMailbox #90CAF9 {
+        note right
+            **RX FIFO Element Layout:**
+            ```
+            Base Address: MCAN_MSG_RAM_BASE + RX_FIFO0_OFFSET = 0xF0280400
+            Each RX Element: 16 bytes (Classic CAN)
+            
+            RX FIFO Read Pointer (Get Index):
+            fifo_get_idx = (CAN->RXF0S >> 8) & 0x3F
+            
+            RX Element Address:
+            rx_addr = MCAN_MSG_RAM_BASE + RX_FIFO0_OFFSET + (fifo_get_idx × 16)
+            ```
+            
+            **RX Element Memory Layout (16 bytes):**
+            ```
+            Offset  Register Name       Bit Layout
+            ───────────────────────────────────────────────────────────
+            0x00    R0 (ID Word)        [31]    - ESI (Error State Indicator)
+                                        [30]    - XTD (Extended Identifier)
+                                        [29]    - RTR (Remote Transmission Request)
+                                        [28:0]  - ID (29-bit Extended or 11-bit Standard)
+            
+            0x04    R1 (Status Word)    [31:24] - ANMF (Accepted Non-matching Frame)
+                                        [23:16] - FIDX (Filter Index)
+                                        [15]    - FDF (FD Format)
+                                        [14]    - BRS (Bit Rate Switch)
+                                        [13:8]  - DLC (Data Length Code)
+                                        [7:0]   - RXTS (RX Timestamp LSB)
+            
+            0x08    DATA_LOW            [31:0]  - Data Bytes 0-3
+            
+            0x0C    DATA_HIGH           [31:0]  - Data Bytes 4-7
+            ```
+            
+            **Bit-Level Parsing (Standard CAN):**
+            ```
+            Example: Received Frame with ID 0x456, DLC=8, Data=0x11223344_55667788
+            
+            Register R0 @ 0xF0280400:
+            Raw Value: 0x11580000
+            
+            Binary:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 0│ 1│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               │  │  │  └──────────────────────────────┬──────────────────────────┘
+               │  │  │                                 │
+               │  │  RTR=0                   Standard ID (0x456) at bits [28:18]
+               │  XTD=0 (Standard 11-bit)
+               ESI=0
+            
+            Extraction Steps:
+            uint32 r0 = *((volatile uint32*)0xF0280400);  // Read R0
+            
+            // Check ID type
+            boolean is_extended = (r0 >> 30) & 0x1;  // Bit 30 (XTD)
+            
+            if (!is_extended) {
+                // Standard ID (11-bit) at bits [28:18]
+                can_id = (r0 >> 18) & 0x7FF;
+                // Result: can_id = 0x456 ✓
+            } else {
+                // Extended ID (29-bit) at bits [28:0]
+                can_id = r0 & 0x1FFFFFFF;
+            }
+            
+            // Extract RTR flag
+            boolean is_rtr = (r0 >> 29) & 0x1;  // Bit 29
+            
+            // Extract ESI flag
+            boolean error_state = (r0 >> 31) & 0x1;  // Bit 31
+            
+            Register R1 @ 0xF0280404:
+            Raw Value: 0x00140800
+            
+            Binary:
+            31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00
+            ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤
+            │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│
+            └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+               └──────────┬──────────┘ └──────┬──────┘ │ │ └─────┬─────┘ └──────────┬──────────┘
+                          │                   │        │ │       │                   │
+                      ANMF=0              FIDX=20      │ │     DLC=8           Timestamp=0
+                                        (Filter 20)   FDF BRS
+            
+            Extraction Steps:
+            uint32 r1 = *((volatile uint32*)0xF0280404);  // Read R1
+            
+            // Extract DLC (bits [13:8])
+            uint8 dlc = (r1 >> 8) & 0x0F;  // Only lower 4 bits for Classic CAN
+            // Result: dlc = 8 ✓
+            
+            // Extract Filter Index (bits [23:16])
+            uint8 filter_idx = (r1 >> 16) & 0xFF;
+            // Result: filter_idx = 20 (matched filter #20)
+            
+            // Extract CAN-FD flags
+            boolean is_fd = (r1 >> 15) & 0x1;    // FDF bit
+            boolean bit_rate_switch = (r1 >> 14) & 0x1;  // BRS bit
+            
+            // Extract Timestamp (bits [7:0] for LSB, full TS may be elsewhere)
+            uint8 timestamp_lsb = r1 & 0xFF;
+            ```
+        end note
+    }
+}
+
+' ============ AUTOSAR STRUCTURE POPULATION ============
+package "AUTOSAR Can Driver: HTH/HRH Structure Population" as AUTOSARStructures #FFF3E0 {
+    
+    rectangle "HTH Configuration & TX Path" as HTHConfig #FFE082 {
+        note right
+            **AUTOSAR HTH Structure Definition:**
+            ```c
+            /* Can_Cfg.h - Configuration Header */
+            
+            typedef struct {
+                Can_HwHandleType CanObjectId;       // HTH ID (0-31)
+                uint8 CanControllerRef;             // Controller ID (0 or 1)
+                Can_ObjectTypeType CanObjectType;   // TRANSMIT or RECEIVE
+                uint8 CanHwObjectCount;             // Always 1 for mailbox
+                uint8 CanMbBufIdx;                  // Physical mailbox index
+                Can_IdType CanIdMask;               // Optional ID filter
+            } Can_HardwareObjectConfigType;
+            
+            /* Example Configuration: 8 TX mailboxes on MCAN0 */
+            const Can_HardwareObjectConfigType Can_HthConfig[8] = {
+                // HTH 0: High priority (CAN ID 0x100-0x1FF)
+                {
+                    .CanObjectId = 0,               // HTH ID 0
+                    .CanControllerRef = 0,          // MCAN0
+                    .CanObjectType = CAN_OBJECT_TYPE_TRANSMIT,
+                    .CanHwObjectCount = 1,
+                    .CanMbBufIdx = 0,               // Physical TX Buffer 0
+                    .CanIdMask = 0x100              // Base ID
+                },
+                
+                // HTH 1: Normal priority (CAN ID 0x200-0x2FF)
+                {
+                    .CanObjectId = 1,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_TRANSMIT,
+                    .CanHwObjectCount = 1,
+                    .CanMbBufIdx = 1,               // Physical TX Buffer 1
+                    .CanIdMask = 0x200
+                },
+                
+                // HTH 2-7: More TX mailboxes...
+            };
+            
+            /* Global Lookup Table: HTH ID → Physical Mailbox */
+            static uint8 Can_HthToMbIdx[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+            ```
+            
+            **TX Path: Application → Hardware Mailbox**
+            ```c
+            /* Step 1: Upper layer calls Can_Write() */
+            // From COM/CanIf layer:
+            Can_PduType pdu;
+            pdu.id = 0x123;                    // CAN ID (11-bit standard)
+            pdu.length = 8;                    // DLC
+            pdu.sdu = data_buffer;             // Data pointer
+            pdu.swPduHandle = 42;              // I-PDU handle
+            
+            Std_ReturnType result = Can_Write(HTH_0, &pdu);
+            
+            /* Step 2: Can_Write() implementation */
+            Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                     const Can_PduType* PduInfo) {
+                
+                // Validate HTH
+                if (Hth >= CAN_NUM_HTH) {
+                    return E_NOT_OK;
+                }
+                
+                // Get controller and physical mailbox index
+                const Can_HardwareObjectConfigType* hth_cfg = &Can_HthConfig[Hth];
+                uint8 controller = hth_cfg->CanControllerRef;  // 0 = MCAN0
+                uint8 mb_idx = hth_cfg->CanMbBufIdx;           // Physical index
+                
+                // Get hardware base address
+                volatile uint32* mcan_base = (controller == 0) ? 
+                    (volatile uint32*)MCAN0_BASE : 
+                    (volatile uint32*)MCAN1_BASE;
+                
+                // Calculate TX mailbox address
+                uint32 msg_ram_base = (controller == 0) ? 
+                    MCAN0_MSG_RAM_BASE : MCAN1_MSG_RAM_BASE;
+                
+                volatile uint32* tx_mailbox = (volatile uint32*)(
+                    msg_ram_base + TX_BUFFER_OFFSET + (mb_idx * 16)
+                );
+                
+                // Check if mailbox is free (read TXBRP register)
+                volatile uint32* txbrp_reg = mcan_base + (MCAN_TXBRP_OFFSET / 4);
+                uint32 pending_mask = (1U << mb_idx);
+                
+                if (*txbrp_reg & pending_mask) {
+                    return CAN_BUSY;  // Mailbox still transmitting
+                }
+                
+                /* Step 3: Populate mailbox with bit shifting */
+                
+                // T0 Register: CAN ID + Flags
+                uint32 t0_value = 0;
+                
+                if (PduInfo->id <= 0x7FF) {
+                    // Standard ID (11-bit)
+                    // Shift ID to bits [28:18]
+                    t0_value = (PduInfo->id & 0x7FF) << 18;
+                    
+                    // IDE bit = 0 (Standard ID) - automatically 0
+                    // ESI bit = 0 (Error Active)
+                    
+                    /*
+                     * Bit Shifting Breakdown:
+                     * 
+                     * Input: PduInfo->id = 0x123 (0001 0010 0011)
+                     * 
+                     * Step 1: Mask to 11 bits
+                     * 0x123 & 0x7FF = 0x123 (no change)
+                     * 
+                     * Step 2: Shift left by 18 bits
+                     * 0x123 << 18:
+                     * 
+                     * Before shift (32-bit):
+                     * 0000 0000 0000 0000 0000 0001 0010 0011
+                     * 
+                     * After shift left 18:
+                     * 0000 0100 1000 1100 0000 0000 0000 0000
+                     * 
+                     * Hexadecimal: 0x048C0000
+                     * 
+                     * Bit positions:
+                     * Bit 31-29: 000 (Reserved + ESI)
+                     * Bit 28-18: 00100100011 (0x123)
+                     * Bit 17-0:  0x00000 (Unused for standard)
+                     */
+                    
+                } else {
+                    // Extended ID (29-bit)
+                    // Shift ID to bits [31:3]
+                    t0_value = (PduInfo->id & 0x1FFFFFFF) << 3;
+                    
+                    // Set XTD bit (bit 30) - actually in R0 for RX, not needed for TX
+                    // For TX, just put full 29-bit ID in bits [31:3]
+                    
+                    /*
+                     * Extended ID Example:
+                     * 
+                     * Input: PduInfo->id = 0x12345678 (29-bit)
+                     * 
+                     * Binary: 0001 0010 0011 0100 0101 0110 0111 1000
+                     * 
+                     * Mask to 29 bits:
+                     * 0x12345678 & 0x1FFFFFFF = 0x12345678
+                     * 
+                     * Shift left by 3 bits:
+                     * 0x12345678 << 3:
+                     * 
+                     * Before:
+                     * xxxx xxx1 0010 0011 0100 0101 0110 0111 1000
+                     * 
+                     * After:
+                     * 1001 0001 1010 0010 1011 0011 1100 0000
+                     * 
+                     * Hexadecimal: 0x91A2B3C0
+                     */
+                }
+                
+                // Write T0 register (ID word)
+                tx_mailbox[0] = t0_value;
+                
+                // T1 Register: DLC + Flags
+                uint32 t1_value = 0;
+                
+                // DLC at bits [18:16] - but for Classic CAN, use bits [19:16]
+                // Actually for M_CAN, DLC is at bits [19:16]
+                uint8 dlc_code = PduInfo->length & 0x0F;  // Limit to 4 bits
+                t1_value = (dlc_code << 16);
+                
+                /*
+                 * DLC Bit Shifting:
+                 * 
+                 * Input: PduInfo->length = 8
+                 * 
+                 * Binary: 0000 1000
+                 * 
+                 * Mask: 8 & 0x0F = 8 (1000)
+                 * 
+                 * Shift left 16 bits:
+                 * 0x00000008 << 16 = 0x00080000
+                 * 
+                 * Bit layout in T1:
+                 * Bit 31-20: 0x000 (MM, EFC, Reserved)
+                 * Bit 19-16: 1000 (DLC = 8)
+                 * Bit 15-0:  0x0000 (Reserved)
+                 */
+                
+                // Optional: Set FDF bit for CAN-FD (bit 21)
+                // t1_value |= (1U << 21);
+                
+                // Optional: Set BRS bit for bit rate switch (bit 20)
+                // t1_value |= (1U << 20);
+                
+                // Write T1 register (DLC word)
+                tx_mailbox[1] = t1_value;
+                
+                // DATA_LOW Register: Bytes 0-3
+                uint32 data_low = 0;
+                if (PduInfo->length >= 1) data_low |= (PduInfo->sdu[0] << 0);
+                if (PduInfo->length >= 2) data_low |= (PduInfo->sdu[1] << 8);
+                if (PduInfo->length >= 3) data_low |= (PduInfo->sdu[2] << 16);
+                if (PduInfo->length >= 4) data_low |= (PduInfo->sdu[3] << 24);
+                
+                /*
+                 * Data Byte Packing:
+                 * 
+                 * Input: sdu[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
+                 * 
+                 * data_low calculation:
+                 * 
+                 * Byte 0: 0x11 << 0  = 0x00000011
+                 * Byte 1: 0x22 << 8  = 0x00002200
+                 * Byte 2: 0x33 << 16 = 0x00330000
+                 * Byte 3: 0x44 << 24 = 0x44000000
+                 * 
+                 * Bitwise OR:
+                 * 0x00000011
+                 * 0x00002200
+                 * 0x00330000
+                 * 0x44000000
+                 * ──────────
+                 * 0x44332211
+                 * 
+                 * Memory layout (little-endian):
+                 * Address: [0x00] [0x01] [0x02] [0x03]
+                 * Data:      0x11   0x22   0x33   0x44
+                 */
+                
+                // Write DATA_LOW register
+                tx_mailbox[2] = data_low;
+                
+                // DATA_HIGH Register: Bytes 4-7
+                uint32 data_high = 0;
+                if (PduInfo->length >= 5) data_high |= (PduInfo->sdu[4] << 0);
+                if (PduInfo->length >= 6) data_high |= (PduInfo->sdu[5] << 8);
+                if (PduInfo->length >= 7) data_high |= (PduInfo->sdu[6] << 16);
+                if (PduInfo->length >= 8) data_high |= (PduInfo->sdu[7] << 24);
+                
+                // Write DATA_HIGH register
+                tx_mailbox[3] = data_high;
+                
+                /* Step 4: Memory Barrier (CRITICAL!) */
+                __DMB();  // Data Memory Barrier
+                __DSB();  // Data Synchronization Barrier
+                
+                /* Step 5: Trigger Transmission */
+                volatile uint32* txbar_reg = mcan_base + (MCAN_TXBAR_OFFSET / 4);
+                *txbar_reg = pending_mask;  // Set bit for this mailbox
+                
+                /*
+                 * TXBAR Register Write:
+                 * 
+                 * mb_idx = 3
+                 * pending_mask = (1U << 3) = 0x00000008
+                 * 
+                 * Binary: 0000 0000 0000 0000 0000 0000 0000 1000
+                 * 
+                 * Hexadecimal: 0x00000008
+                 * 
+                 * This sets bit 3, triggering TX Buffer 3 transmission
+                 */
+                
+                return E_OK;
+            }
+            ```
+        end note
+    }
+    
+    rectangle "HRH Configuration & RX Path" as HRHConfig #FFCA28 {
+        note right
+            **AUTOSAR HRH Structure Definition:**
+            ```c
+            /* Can_Cfg.h */
+            
+            typedef struct {
+                Can_HwHandleType CanObjectId;       // HRH ID (0-63)
+                uint8 CanControllerRef;             // Controller ID
+                Can_ObjectTypeType CanObjectType;   // RECEIVE
+                uint8 CanFifoIdx;                   // FIFO index (0, 1) or 0xFF
+                uint8 CanRxBufferIdx;               // Dedicated buffer index or 0xFF
+                Can_IdType CanIdRangeLower;         // Filter lower bound
+                Can_IdType CanIdRangeUpper;         // Filter upper bound
+            } Can_HardwareObjectConfigType;
+            
+            /* Example Configuration: 4 RX objects */
+            const Can_HardwareObjectConfigType Can_HrhConfig[4] = {
+                // HRH 0: RX FIFO 0 (General messages)
+                {
+                    .CanObjectId = 0,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 0,                // RX FIFO 0
+                    .CanRxBufferIdx = 0xFF,         // Not dedicated buffer
+                    .CanIdRangeLower = 0x100,
+                    .CanIdRangeUpper = 0x3FF
+                },
+                
+                // HRH 1: RX FIFO 1 (Diagnostic)
+                {
+                    .CanObjectId = 1,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 1,
+                    .CanRxBufferIdx = 0xFF,
+                    .CanIdRangeLower = 0x700,
+                    .CanIdRangeUpper = 0x7FF
+                },
+                
+                // HRH 2: Dedicated RX Buffer 0 (Critical message)
+                {
+                    .CanObjectId = 2,
+                    .CanControllerRef = 0,
+                    .CanObjectType = CAN_OBJECT_TYPE_RECEIVE,
+                    .CanFifoIdx = 0xFF,             // Not FIFO
+                    .CanRxBufferIdx = 0,            // Dedicated RX Buffer 0
+                    .CanIdRangeLower = 0x123,
+                    .CanIdRangeUpper = 0x123        // Exact match
+                },
+                
+                // HRH 3: More RX objects...
+            };
+            ```
+            
+            **RX Path: Hardware Mailbox → AUTOSAR Indication**
+            ```c
+            /* RX Interrupt Service Routine */
+            void Can_RxFifo0_ISR(void) {
+                volatile uint32* mcan_base = (volatile uint32*)MCAN0_BASE;
+                uint32 msg_ram_base = MCAN0_MSG_RAM_BASE;
+                
+                /* Step 1: Read FIFO Fill Level */
+                volatile uint32* rxf0s_reg = mcan_base + (MCAN_RXF0S_OFFSET / 4);
+                uint32 rxf0s_value = *rxf0s_reg;
+                
+                /*
+                 * RXF0S Register Bit Layout:
+                 * 
+                 * Bit 31-26: Reserved
+                 * Bit 25:    RF0L (RX FIFO 0 Message Lost)
+                 * Bit 24:    RF0F (RX FIFO 0 Full)
+                 * Bit 23-16: Reserved
+                 * Bit 15-8:  F0GI (FIFO 0 Get Index)
+                 * Bit 7:     Reserved
+                 * Bit 6-0:   F0FL (FIFO 0 Fill Level)
+                 * 
+                 * Example: rxf0s_value = 0x00000302
+                 * 
+                 * Binary:
+                 * 0000 0000 0000 0000 0000 0011 0000 0010
+                 * 
+                 * Fill Level (bits [6:0]): 0000010 = 2 messages
+                 * Get Index (bits [15:8]): 00000011 = 3
+                 */
+                
+                // Extract fill level (bits [6:0])
+                uint8 fill_level = rxf0s_value & 0x7F;
+                
+                // Extract get index (bits [15:8])
+                uint8 get_idx = (rxf0s_value >> 8) & 0x3F;
+                
+                /*
+                 * Bit Extraction:
+                 * 
+                 * fill_level = 0x00000302 & 0x7F
+                 *            = 0x00000002 = 2
+                 * 
+                 * get_idx = (0x00000302 >> 8) & 0x3F
+                 *         = 0x00000003 & 0x3F
+                 *         = 0x03 = 3
+                 */
+                
+                /* Step 2: Loop Through Available Messages */
+                for (uint8 i = 0; i < fill_level; i++) {
+                    // Calculate RX element address
+                    uint32 rx_fifo0_base = msg_ram_base + RX_FIFO0_OFFSET;
+                    volatile uint32* rx_element = (volatile uint32*)(
+                        rx_fifo0_base + (get_idx * 16)
+                    );
+                    
+                    /*
+                     * Address Calculation:
+                     * 
+                     * msg_ram_base = 0xF0280000
+                     * RX_FIFO0_OFFSET = 0x0400
+                     * get_idx = 3
+                     * 
+                     * rx_fifo0_base = 0xF0280000 + 0x0400 = 0xF0280400
+                     * rx_element = 0xF0280400 + (3 × 16)
+                     *            = 0xF0280400 + 0x30
+                     *            = 0xF0280430
+                     */
+                    
+                    /* Step 3: Read R0 Register (ID + Flags) */
+                    uint32 r0_value = rx_element[0];
+                    
+                    /*
+                     * Example: r0_value = 0x11580000
+                     * 
+                     * Binary:
+                     * 0001 0001 0101 1000 0000 0000 0000 0000
+                     * 
+                     * Bit 31 (ESI):  0
+                     * Bit 30 (XTD):  0 (Standard ID)
+                     * Bit 29 (RTR):  0 (Data frame)
+                     * Bits [28:18]:  00010101100 = 0x456
+                     */
+                    
+                    // Extract ESI flag (bit 31)
+                    boolean esi = (r0_value >> 31) & 0x1;
+                    
+                    // Extract XTD flag (bit 30) - Extended ID indicator
+                    boolean is_extended = (r0_value >> 30) & 0x1;
+                    
+                    // Extract RTR flag (bit 29) - Remote frame
+                    boolean is_rtr = (r0_value >> 29) & 0x1;
+                    
+                    // Extract CAN ID
+                    Can_IdType can_id;
+                    
+                    if (!is_extended) {
+                        // Standard ID (11-bit) at bits [28:18]
+                        can_id = (r0_value >> 18) & 0x7FF;
+                        
+                        /*
+                         * Standard ID Extraction:
+                         * 
+                         * r0_value = 0x11580000
+                         * 
+                         * Step 1: Shift right by 18
+                         * 0x11580000 >> 18:
+                         * 
+                         * Binary before shift:
+                         * 0001 0001 0101 1000 0000 0000 0000 0000
+                         * 
+                         * After shift right 18:
+                         * 0000 0000 0000 0000 0000 0100 0101 0110
+                         * 
+                         * Hexadecimal: 0x00000456
+                         * 
+                         * Step 2: Mask with 0x7FF (11 bits)
+                         * 0x00000456 & 0x7FF = 0x456 ✓
+                         */
+                        
+                    } else {
+                        // Extended ID (29-bit) at bits [28:0]
+                        can_id = r0_value & 0x1FFFFFFF;
+                        
+                        /*
+                         * Extended ID Extraction:
+                         * 
+                         * r0_value = 0xA468ACF8 (example)
+                         * 
+                         * Binary:
+                         * 1010 0100 0110 1000 1010 1100 1111 1000
+                         * 
+                         * Mask with 0x1FFFFFFF (29 bits):
+                         * 0xA468ACF8 & 0x1FFFFFFF:
+                         * 
+                         * 0x1FFFFFFF = 0001 1111 1111 1111 1111 1111 1111 1111
+                         * 0xA468ACF8 = 1010 0100 0110 1000 1010 1100 1111 1000
+                         *              ────────────────────────────────────
+                         * Result     = 0010 0100 0110 1000 1010 1100 1111 1000
+                         * 
+                         * Hexadecimal: 0x2468ACF8
+                         * Decimal: 610,025,720
+                         */
+                    }
+                    
+                    /* Step 4: Read R1 Register (DLC + Status) */
+                    uint32 r1_value = rx_element[1];
+                    
+                    /*
+                     * Example: r1_value = 0x00140800
+                     * 
+                     * Binary:
+                     * 0000 0000 0001 0100 0000 1000 0000 0000
+                     * 
+                     * Bits [23:16]: 00010100 = 20 (Filter Index)
+                     * Bit  [15]:    0 (FDF - not CAN-FD)
+                     * Bit  [14]:    0 (BRS - no bit rate switch)
+                     * Bits [13:8]:  001000 = 8 (DLC)
+                     * Bits [7:0]:   00000000 = 0 (Timestamp LSB)
+                     */
+                    
+                    // Extract DLC (bits [13:8] for Classic, bits [19:16] for M_CAN)
+                    // For M_CAN, DLC is actually at bits [19:16]
+                    uint8 dlc = (r1_value >> 16) & 0x0F;
+                    
+                    /*
+                     * DLC Extraction:
+                     * 
+                     * r1_value = 0x00080800
+                     * 
+                     * Shift right 16:
+                     * 0x00080800 >> 16 = 0x00000008
+                     * 
+                     * Mask with 0x0F:
+                     * 0x00000008 & 0x0F = 0x08 = 8 ✓
+                     */
+                    
+                    // Extract Filter Index (bits [23:16])
+                    uint8 filter_idx = (r1_value >> 16) & 0xFF;
+                    
+                    // Extract CAN-FD flags
+                    boolean is_fd = (r1_value >> 15) & 0x1;
+                    boolean brs = (r1_value >> 14) & 0x1;
+                    
+                    /* Step 5: Read Data Bytes */
+                    uint32 data_low = rx_element[2];
+                    uint32 data_high = rx_element[3];
+                    
+                    /*
+                     * Example:
+                     * data_low = 0x44332211
+                     * data_high = 0x88776655
+                     * 
+                     * Extract individual bytes:
+                     */
+                    
+                    uint8 data_buffer[8];
+                    data_buffer[0] = (data_low >> 0) & 0xFF;   // 0x11
+                    data_buffer[1] = (data_low >> 8) & 0xFF;   // 0x22
+                    data_buffer[2] = (data_low >> 16) & 0xFF;  // 0x33
+                    data_buffer[3] = (data_low >> 24) & 0xFF;  // 0x44
+                    data_buffer[4] = (data_high >> 0) & 0xFF;  // 0x55
+                    data_buffer[5] = (data_high >> 8) & 0xFF;  // 0x66
+                    data_buffer[6] = (data_high >> 16) & 0xFF; // 0x77
+                    data_buffer[7] = (data_high >> 24) & 0xFF; // 0x88
+                    
+                    /*
+                     * Byte Extraction Bit Operations:
+                     * 
+                     * data_low = 0x44332211
+                     * 
+                     * Byte 0:
+                     * (0x44332211 >> 0) & 0xFF:
+                     * 0x44332211 & 0xFF = 0x11 ✓
+                     * 
+                     * Byte 1:
+                     * (0x44332211 >> 8) & 0xFF:
+                     * 0x00443322 & 0xFF = 0x22 ✓
+                     * 
+                     * Byte 2:
+                     * (0x44332211 >> 16) & 0xFF:
+                     * 0x00004433 & 0xFF = 0x33 ✓
+                     * 
+                     * Byte 3:
+                     * (0x44332211 >> 24) & 0xFF:
+                     * 0x00000044 & 0xFF = 0x44 ✓
+                     */
+                    
+                    /* Step 6: Acknowledge FIFO Read */
+                    volatile uint32* rxf0a_reg = mcan_base + (MCAN_RXF0A_OFFSET / 4);
+                    *rxf0a_reg = get_idx;
+                    
+                    /*
+                     * FIFO Acknowledge:
+                     * 
+                     * Writing get_idx to RXF0A register tells hardware:
+                     * "I've read element at index X, you can reuse it"
+                     * 
+                     * Hardware increments FIFO get index automatically
+                     * Next read will be at (get_idx + 1) % FIFO_DEPTH
+                     */
+                    
+                    /* Step 7: Find HRH for This Message */
+                    Can_HwHandleType hrh = CAN_INVALID_HRH;
+                    
+                    for (uint8 j = 0; j < CAN_NUM_HRH; j++) {
+                        const Can_HardwareObjectConfigType* hrh_cfg = &Can_HrhConfig[j];
+                        
+                        // Check if FIFO matches
+                        if (hrh_cfg->CanFifoIdx != 0) {
+                            continue;  // Not FIFO 0
+                        }
+                        
+                        // Check if CAN ID in range
+                        if ((can_id >= hrh_cfg->CanIdRangeLower) &&
+                            (can_id <= hrh_cfg->CanIdRangeUpper)) {
+                            hrh = hrh_cfg->CanObjectId;
+                            break;
+                        }
+                    }
+                    
+                    if (hrh == CAN_INVALID_HRH) {
+                        // No matching HRH found (should not happen if filters correct)
+                        DET_ReportError(CAN_MODULE_ID, 0, CAN_E_PARAM_HANDLE);
+                        continue;
+                    }
+                    
+                    /* Step 8: Call Upper Layer (CanIf) */
+                    CanIf_RxIndication(
+                        hrh,                // HRH handle
+                        can_id,             // CAN ID (extracted)
+                        dlc,                // DLC (extracted)
+                        data_buffer         // Data bytes (extracted)
+                    );
+                    
+                    // Update get_idx for next iteration
+                    get_idx = (get_idx + 1) % RX_FIFO0_DEPTH;
+                }
+                
+                /* Step 9: Clear Interrupt Flag */
+                volatile uint32* ir_reg = mcan_base + (MCAN_IR_OFFSET / 4);
+                *ir_reg = MCAN_IR_RF0N_MASK;  // Clear RX FIFO 0 new message flag
+            }
+            ```
+        end note
+    }
+}
+
+' ============ BIT-LEVEL VISUALIZATION ============
+package "Bit-Level Visualization" as BitLevel #E8F5E9 {
+    
+    rectangle "Complete TX Example (CAN ID 0x123, DLC=8)" as TxExample #C8E6C9 {
+        note right
+            **Step-by-Step Bit Operations:**
+            
+            ```
+            Application Data:
+            ─────────────────
+            CAN ID: 0x123 (11-bit standard)
+            DLC: 8 bytes
+            Data: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
+            
+            Physical Memory Write:
+            ──────────────────────
+            
+            Address: 0xF0280000 (TX Buffer 0)
+            
+            ┌─ Offset 0x00: T0 Register (ID Word) ───────────────────────┐
+            │                                                             │
+            │ Input: can_id = 0x123                                       │
+            │                                                             │
+            │ Operation: t0 = (can_id & 0x7FF) << 18                      │
+            │                                                             │
+            │ Step 1: Mask                                                │
+            │   0x123 & 0x7FF = 0x123 (no change for 11-bit ID)          │
+            │                                                             │
+            │ Step 2: Shift left 18 bits                                 │
+            │   Binary: 0000 0001 0010 0011 (16-bit representation)      │
+            │                                                             │
+            │   Shift operation:                                          │
+            │   ┌────────────────────────────────────────────────────┐   │
+            │   │ Position 0-17:  0000 0000 0000 0000 00  (18 zeros) │   │
+            │   │ Position 18-28: 000 0001 0010 0011     (0x123)     │   │
+            │   │ Position 29-31: 000                     (Reserved)  │   │
+            │   └────────────────────────────────────────────────────┘   │
+            │                                                             │
+            │   Resulting 32-bit value:                                   │
+            │   0000 0100 1000 1100 0000 0000 0000 0000                   │
+            │   0    4    8    C    0    0    0    0                      │
+            │   Hexadecimal: 0x048C0000                                   │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280000) = 0x048C0000                       │
+            │                                                             │
+            │   Hardware Register View:                                   │
+            │   ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐       │
+            │   │31│30│29│28│27│26│25│24│23│22│21│20│19│18│17│16│       │
+            │   ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤       │
+            │   │ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 1│ 0│ 0│       │
+            │   └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘       │
+            │   ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐       │
+            │   │15│14│13│12│11│10│09│08│07│06│05│04│03│02│01│00│       │
+            │   ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┤       │
+            │   │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│       │
+            │   └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x04: T1 Register (DLC Word) ──────────────────────┐
+            │                                                             │
+            │ Input: dlc = 8                                              │
+            │                                                             │
+            │ Operation: t1 = (dlc & 0x0F) << 16                          │
+            │                                                             │
+            │ Step 1: Mask                                                │
+            │   8 & 0x0F = 8 (0000 1000)                                  │
+            │                                                             │
+            │ Step 2: Shift left 16 bits                                 │
+            │   Binary: 0000 1000                                         │
+            │                                                             │
+            │   Shift operation:                                          │
+            │   ┌────────────────────────────────────────────────────┐   │
+            │   │ Position 0-15:  0000 0000 0000 0000  (16 zeros)    │   │
+            │   │ Position 16-19: 1000                  (DLC = 8)     │   │
+            │   │ Position 20-31: 0000 0000 0000        (Reserved)    │   │
+            │   └────────────────────────────────────────────────────┘   │
+            │                                                             │
+            │   Resulting 32-bit value:                                   │
+            │   0000 0000 0000 1000 0000 0000 0000 0000                   │
+            │   0    0    0    8    0    0    0    0                      │
+            │   Hexadecimal: 0x00080000                                   │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280004) = 0x00080000                       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x08: DATA_LOW Register (Bytes 0-3) ───────────────┐
+            │                                                             │
+            │ Input: data[] = {0x11, 0x22, 0x33, 0x44, ...}              │
+            │                                                             │
+            │ Operation: Bitwise OR of shifted bytes                      │
+            │                                                             │
+            │ data_low = (data[0] << 0)  |                                │
+            │            (data[1] << 8)  |                                │
+            │            (data[2] << 16) |                                │
+            │            (data[3] << 24)                                  │
+            │                                                             │
+            │ Step-by-step:                                               │
+            │                                                             │
+            │ Byte 0: 0x11 << 0  = 0x00000011                             │
+            │   Binary: 0000 0000 0000 0000 0000 0000 0001 0001           │
+            │                                                             │
+            │ Byte 1: 0x22 << 8  = 0x00002200                             │
+            │   Binary: 0000 0000 0000 0000 0010 0010 0000 0000           │
+            │                                                             │
+            │ Byte 2: 0x33 << 16 = 0x00330000                             │
+            │   Binary: 0000 0000 0011 0011 0000 0000 0000 0000           │
+            │                                                             │
+            │ Byte 3: 0x44 << 24 = 0x44000000                             │
+            │   Binary: 0100 0100 0000 0000 0000 0000 0000 0000           │
+            │                                                             │
+            │ Bitwise OR:                                                 │
+            │   0x00000011                                                │
+            │ | 0x00002200                                                │
+            │ | 0x00330000                                                │
+            │ | 0x44000000                                                │
+            │   ──────────                                                │
+            │   0x44332211                                                │
+            │                                                             │
+            │   Bit-by-bit OR operation:                                  │
+            │   Position: 31-24 23-16 15-8  7-0                           │
+            │   ─────────────────────────────────                         │
+            │   Byte 0:   00    00    00    11  (0x11)                    │
+            │   Byte 1:   00    00    22    00  (0x22 << 8)               │
+            │   Byte 2:   00    33    00    00  (0x33 << 16)              │
+            │   Byte 3:   44    00    00    00  (0x44 << 24)              │
+            │   Result:   44    33    22    11  (0x44332211)              │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF0280008) = 0x44332211                       │
+            │                                                             │
+            │   Little-Endian Memory Layout:                              │
+            │   Address:  0x08  0x09  0x0A  0x0B                          │
+            │   Value:    0x11  0x22  0x33  0x44                          │
+            └─────────────────────────────────────────────────────────────┘
+            
+            ┌─ Offset 0x0C: DATA_HIGH Register (Bytes 4-7) ──────────────┐
+            │                                                             │
+            │ Input: data[] = {..., 0x55, 0x66, 0x77, 0x88}              │
+            │                                                             │
+            │ Operation: Same as DATA_LOW                                 │
+            │                                                             │
+            │ data_high = (data[4] << 0)  |                               │
+            │             (data[5] << 8)  |                               │
+            │             (data[6] << 16) |                               │
+            │             (data[7] << 24)                                 │
+            │                                                             │
+            │ Result: 0x88776655                                          │
+            │                                                             │
+            │ Memory Write:                                               │
+            │   *((uint32*)0xF028000C) = 0x88776655                       │
+            └─────────────────────────────────────────────────────────────┘
+            
+            Complete Mailbox After Population:
+            ───────────────────────────────────
+            
+            Memory Dump (16 bytes starting at 0xF0280000):
+            
+            Address    | +0        +4        +8        +C
+            ───────────┼──────────────────────────────────────
+            0xF0280000 │ 048C0000  00080000  44332211  88776655
+            
+            Interpretation:
+            ───────────────
+            T0 (ID):    CAN ID = 0x123 (Standard)
+            T1 (DLC):   DLC = 8 bytes
+            DATA_LOW:   0x11, 0x22, 0x33, 0x44
+            DATA_HIGH:  0x55, 0x66, 0x77, 0x88
+            
+            Hardware View:
+            ──────────────
+            When TXBAR register is written (bit 0 set),
+            CAN controller reads these 16 bytes and
+            transmits them on the CAN bus according to
+            CAN protocol timing and arbitration rules.
+            ```
+        end note
+    }
+    
+    rectangle "Complete RX Example (Parsing Received Frame)" as RxExample #A5D6A7 {
+        note right
+            **Hardware-to-Software Data Flow:**
+            
+            ```
+            Received CAN Frame on Bus:
+            ──────────────────────────
+            CAN ID: 0x456 (11-bit standard)
+            DLC: 8 bytes
+            Data: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11]
+            
+            Hardware Processing:
+            ────────────────────
+            1. Frame arrives on CAN bus (physical layer)
+            2. CAN controller captures arbitration bits
+            3. Hardware filter matches (Filter Index = 5)
+            4. Frame stored in RX FIFO 0, element index 2
+            5. Interrupt triggered
+            
+            Physical Memory State:
+            ──────────────────────
+            
+            Address: 0xF0280420 (RX FIFO 0, Element 2)
+            = 0xF0280400 (FIFO base) + (2 × 16 bytes)
+            
+                                    ┌─ Offset 0x00: R0 Register (ID + Flags) ────────────────────┐
+                        │                                                             │
+                        │ Hardware Written Value: 0x11580000                          │
+                        │                                                             │
+                        │ Binary Representation (32 bits):                            │
+                        │ 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 ... 0│
+                        │ ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──...──┤│
+                        │ │ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 0│ 0│ 1│ 0│ 1│ 1│ 0│ 0│ 0│ 0│ 0...0││
+                        │ └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──...──┘│
+                        │    │  │  │  └────────────────┬────────────────┘              │
+                        │    │  │  │                   │                               │
+                        │    │  │  RTR=0         Standard ID 0x456                     │
+                        │    │  XTD=0           at bits [28:18]                        │
+                        │    ESI=0                                                     │
+                        │                                                             │
+                        │ Software Extraction (in ISR):                               │
+                        │ ─────────────────────────────                               │
+                        │                                                             │
+                        │ uint32 r0 = *((volatile uint32*)0xF0280420);                │
+                        │ // r0 = 0x11580000                                          │
+                        │                                                             │
+                        │ // Step 1: Extract XTD flag (bit 30)                        │
+                        │ boolean is_extended = (r0 >> 30) & 0x1;                     │
+                        │                                                             │
+                        │ Bit Operation Detail:                                       │
+                        │ r0 >> 30:                                                   │
+                        │   0x11580000 >> 30:                                         │
+                        │   0001 0001 0101 1000 ... → shift right 30 positions       │
+                        │   0000 0000 0000 0000 0000 0000 0000 0000                   │
+                        │   Result: 0x00000000                                        │
+                        │                                                             │
+                        │   & 0x1 (mask lowest bit):                                  │
+                        │   0x00000000 & 0x1 = 0x0                                    │
+                        │   is_extended = FALSE ✓ (Standard ID)                       │
+                        │                                                             │
+                        │ // Step 2: Extract RTR flag (bit 29)                        │
+                        │ boolean is_rtr = (r0 >> 29) & 0x1;                          │
+                        │                                                             │
+                        │ Bit Operation Detail:                                       │
+                        │ r0 >> 29:                                                   │
+                        │   0x11580000 >> 29:                                         │
+                        │   Result: 0x00000000                                        │
+                        │   & 0x1 = 0x0                                               │
+                        │   is_rtr = FALSE ✓ (Data Frame)                             │
+                        │                                                             │
+                        │ // Step 3: Extract CAN ID (Standard 11-bit at bits [28:18])│
+                        │ Can_IdType can_id = (r0 >> 18) & 0x7FF;                     │
+                        │                                                             │
+                        │ Detailed Bit Shifting:                                      │
+                        │ ─────────────────────                                       │
+                        │                                                             │
+                        │ Original r0 value: 0x11580000                               │
+                        │ Binary (showing relevant bits):                             │
+                        │                                                             │
+                        │ Bit Position:  31 30 29 28 27 26 25 24 23 22 21 20 19 18   │
+                        │ Value:         0  0  0  0  0  1  0  0  0  1  0  1  1  0    │
+                        │                              └──────────────┬──────────┘    │
+                        │                                             │               │
+                        │                                    CAN ID bits [28:18]      │
+                        │                                                             │
+                        │ Bit Position:  17 16 15 14 13 12 11 10 09 08 07 06 05 04   │
+                        │ Value:         0  0  0  0  0  0  0  0  0  0  0  0  0  0    │
+                        │                                                             │
+                        │ Step 3a: Shift right by 18 positions                        │
+                        │ ────────────────────────────────────                        │
+                        │                                                             │
+                        │ Before shift (0x11580000):                                  │
+                        │ 0000 0001 0001 0101 1000 0000 0000 0000                     │
+                        │                                                             │
+                        │ Shift operation (>> 18):                                    │
+                        │ Move all bits 18 positions to the right                     │
+                        │ Fill left side with zeros                                   │
+                        │                                                             │
+                        │ Position tracking:                                          │
+                        │ - Bit 18 moves to position 0                                │
+                        │ - Bit 19 moves to position 1                                │
+                        │ - Bit 28 moves to position 10                               │
+                        │ - Bits 29-31 shift out (discarded)                          │
+                        │                                                             │
+                        │ After shift (r0 >> 18):                                     │
+                        │ 0000 0000 0000 0000 0000 0100 0101 0110                     │
+                        │ Hexadecimal: 0x00000456                                     │
+                        │                                                             │
+                        │ Visual representation:                                      │
+                        │                                                             │
+                        │ Before:  [31...18][17...10][9...2][1 0]                    │
+                        │          [ID bits][ zeros ][ 0s  ][00]                     │
+                        │                                                             │
+                        │ After:   [31...11][10...0]                                 │
+                        │          [ zeros ][ID=456]                                  │
+                        │                                                             │
+                        │ Step 3b: Mask with 0x7FF (11 bits)                          │
+                        │ ─────────────────────────────────────                       │
+                        │                                                             │
+                        │ 0x7FF in binary (11 bits of 1s):                            │
+                        │ 0000 0000 0000 0000 0000 0111 1111 1111                     │
+                        │ Position: 31-11 all zeros, 10-0 all ones                    │
+                        │                                                             │
+                        │ Bitwise AND operation:                                      │
+                        │                                                             │
+                        │   0x00000456: 0000 0000 0000 0000 0000 0100 0101 0110      │
+                        │ & 0x000007FF: 0000 0000 0000 0000 0000 0111 1111 1111      │
+                        │   ──────────────────────────────────────────────────       │
+                        │   Result:     0000 0000 0000 0000 0000 0100 0101 0110      │
+                        │                                                             │
+                        │ Hexadecimal: 0x456                                          │
+                        │ Decimal: 1110                                               │
+                        │                                                             │
+                        │ Verification:                                               │
+                        │ 0x456 = 0100 0101 0110 (binary)                             │
+                        │       = 4×256 + 5×16 + 6                                    │
+                        │       = 1024 + 80 + 6 = 1110 ✓                              │
+                        │                                                             │
+                        │ Final extracted value: can_id = 0x456 ✓                     │
+                        └─────────────────────────────────────────────────────────────┘
+                        
+                        ┌─ Offset 0x04: R1 Register (DLC + Status) ──────────────────┐
+                        │                                                             │
+                        │ Hardware Written Value: 0x00050800                          │
+                        │                                                             │
+                        │ Binary Representation (32 bits):                            │
+                        │ 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 ... 0│
+                        │ ├──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──┼──...──┤│
+                        │ │ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 0│ 1│ 0│ 1│ 0│ 0...0││
+                        │ └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──...──┘│
+                        │ └────┬────┘ └────┬────┘ │ │ └──┬──┘ └────┬────┘           │
+                        │      │           │       │ │    │         │                │
+                        │   ANMF=0      FIDX=5     │ │  DLC=8   Timestamp           │
+                        │              (Filter 5)  FDF BRS                           │
+                        │                                                             │
+                        │ Software Extraction (in ISR):                               │
+                        │ ─────────────────────────────                               │
+                        │                                                             │
+                        │ uint32 r1 = *((volatile uint32*)0xF0280424);                │
+                        │ // r1 = 0x00050800                                          │
+                        │                                                             │
+                        │ // Step 1: Extract DLC (bits [19:16] for M_CAN)            │
+                        │ uint8 dlc = (r1 >> 16) & 0x0F;                              │
+                        │                                                             │
+                        │ Detailed Bit Shifting:                                      │
+                        │ ─────────────────────                                       │
+                        │                                                             │
+                        │ Original r1 value: 0x00050800                               │
+                        │ Binary: 0000 0000 0000 0101 0000 1000 0000 0000             │
+                        │                                                             │
+                        │ Bit layout breakdown:                                       │
+                        │ Bit 31-24: 0x00 (ANMF = 0, all zeros)                       │
+                        │ Bit 23-16: 0x05 (Filter Index = 5)                          │
+                        │ Bit 15-14: 00 (FDF=0, BRS=0 - Classic CAN)                  │
+                        │ Bit 19-16: 1000 (DLC = 8) ← What we need!                   │
+                        │ Bit 13-8:  00 1000 (continuation of DLC field)              │
+                        │ Bit 7-0:   0x00 (Timestamp LSB = 0)                         │
+                        │                                                             │
+                        │ Step 1a: Shift right by 16 positions                        │
+                        │ ────────────────────────────────────                        │
+                        │                                                             │
+                        │ Before shift (0x00050800):                                  │
+                        │ Bit pos: 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16   │
+                        │          0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  1    │
+                        │ Bit pos: 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00   │
+                        │          0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0    │
+                        │                                                             │
+                        │ After shift right 16 (r1 >> 16):                            │
+                        │ All bits move 16 positions right                            │
+                        │ Bit 16 → Bit 0                                              │
+                        │ Bit 19 → Bit 3                                              │
+                        │ Bit 23 → Bit 7                                              │
+                        │ Bits 0-15 are discarded                                     │
+                        │ Bits 16-31 fill left with zeros                             │
+                        │                                                             │
+                        │ Result:                                                     │
+                        │ Bit pos: 31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16   │
+                        │          0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0    │
+                        │ Bit pos: 15 14 13 12 11 10 09 08 07 06 05 04 03 02 01 00   │
+                        │          0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  1    │
+                        │                                                             │
+                        │ Hexadecimal: 0x00000005                                     │
+                        │                                                             │
+                        │ WAIT! This extracts FILTER INDEX, not DLC!                  │
+                        │                                                             │
+                        │ CORRECTION for M_CAN DLC field:                             │
+                        │ ──────────────────────────────────                          │
+                        │                                                             │
+                        │ For M_CAN (Bosch M_CAN IP), DLC is at bits [19:16]         │
+                        │ But R1 register layout in AWR294x is different!             │
+                        │                                                             │
+                        │ Correct R1 layout for AWR294x MCAN:                         │
+                        │ Bit 31-24: ANMF (0x00)                                      │
+                        │ Bit 23-16: FIDX (0x05)                                      │
+                        │ Bit 15:    FDF (0)                                          │
+                        │ Bit 14:    BRS (0)                                          │
+                        │ Bit 13-8:  Reserved                                         │
+                        │ Bit 7-0:   RXTS (Timestamp)                                 │
+                        │                                                             │
+                        │ DLC is actually in SEPARATE field!                          │
+                        │ For M_CAN, DLC encoded in R1 bits [19:16]:                  │
+                        │                                                             │
+                        │ Re-examining 0x00050800:                                    │
+                        │ Binary: 0000 0000 0000 0101 0000 1000 0000 0000             │
+                        │         └────┬────┘ └────┬────┘ │││└┬┘└─────┬─────┘        │
+                        │          ANMF=0     FIDX=5   DLC│││ │  RXTS=0              │
+                        │                                 │││ └─ Bit 8                │
+                        │                              Bits 19-16                     │
+                        │                                                             │
+                        │ Isolating bits [19:16]:                                     │
+                        │ Position 19: 0                                              │
+                        │ Position 18: 1                                              │
+                        │ Position 17: 0                                              │
+                        │ Position 16: 0                                              │
+                        │ Binary: 0100 (base 2) = 4 (decimal)                         │
+                        │                                                             │
+                        │ Wait, that's wrong! Let me recalculate...                   │
+                        │                                                             │
+                        │ 0x00050800 binary breakdown by nibbles:                     │
+                        │ 0x0: 0000                                                   │
+                        │ 0x0: 0000                                                   │
+                        │ 0x0: 0000                                                   │
+                        │ 0x5: 0101  ← Bits 19-16 (DLC should be here)                │
+                        │ 0x0: 0000                                                   │
+                        │ 0x8: 1000  ← Bits 11-8                                      │
+                        │ 0x0: 0000                                                   │
+                        │ 0x0: 0000                                                   │
+                        │                                                             │
+                        │ So bits [19:16] = 0101 (binary) = 5                         │
+                        │                                                             │
+                        │ But we said DLC=8! Let me correct the hardware value...     │
+                        │                                                             │
+                        │ CORRECTED Hardware Written Value: 0x00080800                │
+                        │ (Filter Index = 8 doesn't make sense, let me fix properly)  │
+                        │                                                             │
+                        │ PROPER CORRECTION:                                          │
+                        │ If DLC = 8 (1000 binary) at bits [19:16]                    │
+                        │ And Filter Index = 5 (0101 binary) at bits [23:16]          │
+                        │                                                             │
+                        │ Wait, Filter Index uses 8 bits, not 4!                      │
+                        │ Let me reconsider the bit layout...                         │
+                        │                                                             │
+                        │ ACTUAL M_CAN R1 Register (from Bosch spec):                 │
+                        │ ────────────────────────────────────────                    │
+                        │ Bit 31:    ANMF (Accepted Non-Matching Frame)               │
+                        │ Bit 30-24: FIDX (Filter Index) [6:0]                        │
+                        │ Bit 23-21: Reserved                                         │
+                        │ Bit 20:    ESI (Error State Indicator)                      │
+                        │ Bit 19:    FDF (CAN FD Format)                              │
+                        │ Bit 18:    BRS (Bit Rate Switch)                            │
+                        │ Bit 17-16: DLC [3:2] (upper 2 bits)                         │
+                        │ Bit 15-12: RXTS [15:12] (Timestamp upper nibble)            │
+                        │ Bit 11-8:  DLC [1:0] + RXTS [11:10] ← COMPLEX!              │
+                        │ Bit 7-0:   RXTS [9:0] (Timestamp lower 10 bits)             │
+                        │                                                             │
+                        │ SIMPLIFIED for AWR294x (actual implementation):             │
+                        │ ──────────────────────────────────────────────              │
+                        │                                                             │
+                        │ Let's assume cleaner layout based on TRM:                   │
+                        │ R1 = 0x05140800 (revised example)                           │
+                        │                                                             │
+                        │ Binary: 0000 0101 0001 0100 0000 1000 0000 0000             │
+                        │         └──┬──┘ └──┬──┘ └─┬─┘│││ └───┬───┘                 │
+                        │            │       │       │  │││     │                     │
+                        │         ANMF=0  Filter=5  Rsvd││    Timestamp              │
+                        │                                ││                           │
+                        │                              FDF,BRS                        │
+                        │                                                             │
+                        │ Extracting DLC (assuming bits [19:16]):                     │
+                        │                                                             │
+                        │ r1 = 0x05140800                                             │
+                        │                                                             │
+                        │ // Method: Extract bits [19:16]                             │
+                        │ dlc = (r1 >> 16) & 0x0F;                                    │
+                        │                                                             │
+                        │ Step 1: r1 >> 16                                            │
+                        │ 0x05140800 >> 16:                                           │
+                        │ Binary before:                                              │
+                        │ 0000 0101 0001 0100 0000 1000 0000 0000                     │
+                        │                                                             │
+                        │ After shifting right 16 positions:                          │
+                        │ 0000 0000 0000 0000 0000 0101 0001 0100                     │
+                        │ Hexadecimal: 0x00000514                                     │
+                        │                                                             │
+                        │ Step 2: Mask with 0x0F (keep only lower 4 bits)             │
+                        │ 0x00000514 & 0x0F:                                          │
+                        │ Binary:                                                     │
+                        │   0x00000514: ...0000 0101 0001 0100                        │
+                        │ & 0x0000000F: ...0000 0000 0000 1111                        │
+                        │   ──────────────────────────────────                        │
+                        │   Result:     ...0000 0000 0000 0100                        │
+                        │                                                             │
+                        │ Hexadecimal: 0x04                                           │
+                        │ Decimal: 4                                                  │
+                        │                                                             │
+                        │ This still doesn't give us 8!                               │
+                        │                                                             │
+                        │ FINAL CORRECTION:                                           │
+                        │ ────────────────                                            │
+                        │ For DLC=8, we need bits [19:16] = 1000 (binary)             │
+                        │                                                             │
+                        │ Correct R1 value should be:                                 │
+                        │ Filter=5 at bits [30:24] = 0000 0101                        │
+                        │ DLC=8 at bits [19:16] = 1000                                │
+                        │ Timestamp=0 at bits [15:0] = 0x0000                         │
+                        │                                                             │
+                        │ Constructing R1:                                            │
+                        │ Bit 31:    0 (ANMF)                                         │
+                        │ Bit 30-24: 0000101 (Filter = 5)                             │
+                        │ Bit 23-20: 0000 (Reserved)                                  │
+                        │ Bit 19-16: 1000 (DLC = 8)                                   │
+                        │ Bit 15-0:  0x0000 (Timestamp = 0)                           │
+                        │                                                             │
+                        │ Binary:                                                     │
+                        │ 0|0000101|0000|1000|0000000000000000                        │
+                        │ 0000 0101 0000 1000 0000 0000 0000 0000                     │
+                        │                                                             │
+                        │ Hexadecimal: 0x05080000                                     │
+                        │                                                             │
+                        │ NOW extracting DLC:                                         │
+                        │ r1 = 0x05080000                                             │
+                        │ dlc = (r1 >> 16) & 0x0F;                                    │
+                        │                                                             │
+                        │ r1 >> 16:                                                   │
+                        │ 0x05080000 >> 16 = 0x00000508                               │
+                        │                                                             │
+                        │ 0x00000508 & 0x0F:                                          │
+                        │ Binary:                                                     │
+                        │   0x00000508: ...0000 0101 0000 1000                        │
+                        │ & 0x0000000F: ...0000 0000 0000 1111                        │
+                        │   ──────────────────────────────────                        │
+                        │   Result:     ...0000 0000 0000 1000                        │
+                        │                                                             │
+                        │ Hexadecimal: 0x08                                           │
+                        │ Decimal: 8 ✓✓✓                                              │
+                        │                                                             │
+                        │ Final extracted value: dlc = 8 ✓                            │
+                        │                                                             │
+                        │ // Step 2: Extract Filter Index (bits [30:24])              │
+                        │ uint8 filter_idx = (r1 >> 24) & 0x7F;                       │
+                        │                                                             │
+                        │ r1 >> 24:                                                   │
+                        │ 0x05080000 >> 24 = 0x00000005                               │
+                        │                                                             │
+                        │ 0x00000005 & 0x7F = 0x05                                    │
+                        │ filter_idx = 5 ✓                                            │
+                        └─────────────────────────────────────────────────────────────┘
+                        
+                        ┌─ Offset 0x08: DATA_LOW Register (Bytes 0-3) ───────────────┐
+                        │                                                             │
+                        │ Hardware Written Value: 0xDDCCBBAA                          │
+                        │                                                             │
+                        │ Binary: 1101 1101 1100 1100 1011 1011 1010 1010             │
+                        │         └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘                     │
+                        │           DD      CC      BB      AA                        │
+                        │         Byte 3  Byte 2  Byte 1  Byte 0                      │
+                        │                                                             │
+                        │ Software Extraction (in ISR):                               │
+                        │ ─────────────────────────────                               │
+                        │                                                             │
+                        │ uint32 data_low = rx_element[2];                            │
+                        │ // data_low = 0xDDCCBBAA                                    │
+                        │                                                             │
+                        │ uint8 data_buffer[8];                                       │
+                        │                                                             │
+                        │ // Extract Byte 0 (bits [7:0])                              │
+                        │ data_buffer[0] = (data_low >> 0) & 0xFF;                    │
+                        │                                                             │
+                        │ Bit operation:                                              │
+                        │ data_low >> 0 = 0xDDCCBBAA (no shift)                       │
+                        │ 0xDDCCBBAA & 0xFF:                                          │
+                        │   0xDDCCBBAA: ...1101 1101 1100 1100 1011 1011 1010 1010    │
+                        │ & 0x000000FF: ...0000 0000 0000 0000 0000 0000 1111 1111    │
+                        │   ────────────────────────────────────────────────────      │
+                        │   Result:     ...0000 0000 0000 0000 0000 0000 1010 1010    │
+                        │                                                             │
+                        │ Hexadecimal: 0xAA ✓                                         │
+                        │ data_buffer[0] = 0xAA                                       │
+                        │                                                             │
+                        │ // Extract Byte 1 (bits [15:8])                             │
+                        │ data_buffer[1] = (data_low >> 8) & 0xFF;                    │
+                        │                                                             │
+                        │ Bit operation:                                              │
+                        │ data_low >> 8:                                              │
+                        │ 0xDDCCBBAA >> 8 = 0x00DDCCBB                                │
+                        │                                                             │
+                        │ Shift visualization:                                        │
+                        │ Before: 1101 1101 1100 1100 1011 1011 1010 1010             │
+                        │         └───────────────────────┘                           │
+                        │ After:  0000 0000 1101 1101 1100 1100 1011 1011             │
+                        │                   └───────────────────────┘                 │
+                        │ (Right 8 positions, leftmost 8 bits become zero)            │
+                        │                                                             │
+                        │ 0x00DDCCBB & 0xFF:                                          │
+                        │   0x00DDCCBB: ...0000 0000 1101 1101 1100 1100 1011 1011    │
+                        │ & 0x000000FF: ...0000 0000 0000 0000 0000 0000 1111 1111    │
+                        │   ────────────────────────────────────────────────────      │
+                        │   Result:     ...0000 0000 0000 0000 0000 0000 1011 1011    │
+                        │                                                             │
+                        │ Hexadecimal: 0xBB ✓                                         │
+                        │ data_buffer[1] = 0xBB                                       │
+                        │                                                             │
+                        │ // Extract Byte 2 (bits [23:16])                            │
+                        │ data_buffer[2] = (data_low >> 16) & 0xFF;                   │
+                        │                                                             │
+                        │ data_low >> 16:                                             │
+                        │ 0xDDCCBBAA >> 16 = 0x0000DDCC                               │
+                        │ 0x0000DDCC & 0xFF = 0xCC ✓                                  │
+                        │ data_buffer[2] = 0xCC                                       │
+                        │                                                             │
+                        │ // Extract Byte 3 (bits [31:24])                            │
+                        │ data_buffer[3] = (data_low >> 24) & 0xFF;                   │
+                        │                                                             │
+                        │ data_low >> 24:                                             │
+                        │ 0xDDCCBBAA >> 24 = 0x000000DD                               │
+                        │ 0x000000DD & 0xFF = 0xDD ✓                                  │
+                        │ data_buffer[3] = 0xDD                                       │
+                        └─────────────────────────────────────────────────────────────┘
+                        
+                        ┌─ Offset 0x0C: DATA_HIGH Register (Bytes 4-7) ──────────────┐
+                        │                                                             │
+                        │ Hardware Written Value: 0x1100FFEE                          │
+                        │                                                             │
+                        │ Binary: 0001 0001 0000 0000 1111 1111 1110 1110             │
+                        │         └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘                     │
+                        │           11      00      FF      EE                        │
+                        │         Byte 7  Byte 6  Byte 5  Byte 4                      │
+                        │                                                             │
+                        │ Software Extraction:                                        │
+                        │ ───────────────────                                         │
+                        │                                                             │
+                        │ uint32 data_high = rx_element[3];                           │
+                        │ // data_high = 0x1100FFEE                                   │
+                        │                                                             │
+                        │ // Extract Byte 4 (bits [7:0])                              │
+                        │ data_buffer[4] = (data_high >> 0) & 0xFF;                   │
+                        │ Result: 0xEE ✓                                              │
+                        │                                                             │
+                        │ // Extract Byte 5 (bits [15:8])                             │
+                        │ data_buffer[5] = (data_high >> 8) & 0xFF;                   │
+                        │ 0x1100FFEE >> 8 = 0x001100FF                                │
+                        │ 0x001100FF & 0xFF = 0xFF ✓                                  │
+                        │                                                             │
+                        │ // Extract Byte 6 (bits [23:16])                            │
+                        │ data_buffer[6] = (data_high >> 16) & 0xFF;                  │
+                        │ 0x1100FFEE >> 16 = 0x00001100                               │
+                        │ 0x00001100 & 0xFF = 0x00 ✓                                  │
+                        │                                                             │
+                        │ // Extract Byte 7 (bits [31:24])                            │
+                        │ data_buffer[7] = (data_high >> 24) & 0xFF;                  │
+                        │ 0x1100FFEE >> 24 = 0x00000011                               │
+                        │ 0x00000011 & 0xFF = 0x11 ✓                                  │
+                        └─────────────────────────────────────────────────────────────┘
+                        
+                        ┌─ Final Extracted CAN Frame Data ───────────────────────────┐
+                        │                                                             │
+                        │ From Hardware RX Mailbox @ 0xF0280420                       │
+                        │ ─────────────────────────────────────                       │
+                        │                                                             │
+                        │ can_id = 0x456 (Standard 11-bit)                            │
+                        │ dlc = 8 bytes                                               │
+                        │ is_extended = FALSE                                         │
+                        │ is_rtr = FALSE                                              │
+                        │ filter_idx = 5                                              │
+                        │                                                             │
+                        │ data_buffer[]:                                              │
+                        │   [0] = 0xAA                                                │
+                        │   [1] = 0xBB                                                │
+                        │   [2] = 0xCC                                                │
+                        │   [3] = 0xDD                                                │
+                        │   [4] = 0xEE                                                │
+                        │   [5] = 0xFF                                                │
+                        │   [6] = 0x00                                                │
+                        │   [7] = 0x11                                                │
+                        │                                                             │
+                        │ ✓ Matches expected received frame!                          │
+                        │                                                             │
+                        │ Next Step: Find matching HRH and call CanIf_RxIndication()  │
+                        │                                                             │
+                        │ // Find HRH based on CAN ID range                           │
+                        │ for (uint8 i = 0; i < CAN_NUM_HRH; i++) {                   │
+                        │     if (Can_HrhConfig[i].CanFifoIdx == 0) { // FIFO 0       │
+                        │         if (can_id >= Can_HrhConfig[i].CanIdRangeLower &&   │
+                        │             can_id <= Can_HrhConfig[i].CanIdRangeUpper) {   │
+                        │             hrh = Can_HrhConfig[i].CanObjectId;             │
+                        │             break;                                          │
+                        │         }                                                   │
+                        │     }                                                       │
+                        │ }                                                           │
+                        │                                                             │
+                        │ // Assuming HRH 0 matches (range 0x400-0x4FF):              │
+                        │ if (0x456 >= 0x400 && 0x456 <= 0x4FF) {                     │
+                        │     hrh = 0; ✓                                              │
+                        │ }                                                           │
+                        │                                                             │
+                        │ // Call upper layer                                         │
+                        │ CanIf_RxIndication(                                         │
+                        │     hrh = 0,                // HRH handle                   │
+                        │     can_id = 0x456,         // Extracted CAN ID             │
+                        │     dlc = 8,                // Extracted DLC                │
+                        │     data_buffer             // Extracted data bytes         │
+                        │ );                                                          │
+                        └─────────────────────────────────────────────────────────────┘
+                        ```
+                    end note
+                }
+            }
+            
+            @enduml

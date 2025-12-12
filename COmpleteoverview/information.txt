@@ -1,0 +1,964 @@
+Skip to sidebar
+Skip to main content
+Skip to breadcrumbs
+Skip to search
+Linked Applications
+Docupedia
+Spaces
+Analytics
+Collections
+Create
+
+Search
+Help
+0
+
+
+
+BGSV Car Multimedia
+
+Pages
+Analytics
+Space shortcuts
+Information Board
+On-Boarding Checklist
+Training Resources & Planning
+02-Hardware Device Assignment
+Meeting notes
+A-IVI Speedlock handling
+Refer to CMD-OTAS site
+Product requirements
+UML Diagrams (2)
+Root page for draw.io custom templates
+Page tree
+Information Board
+Welcome aboard!
+Common
+HMI
+BaseSW & Platform
+Security
+Middleware
+EMC22
+Tools
+Personal
+Luynh Phan
+Quynh Le
+Tri Dang
+Y Nguyen
+Si Dao
+Truc Le
+Bao Anh
+Gns1hc
+Vinh Phuc
+Pani Raj Vellala Ramarao
+Niem Do
+Son Le
+Tran Dao Long
+Thang, Tran Manh
+Vu Thi Nhu Trang
+Nguyen Van Con
+Nguyen Thanh Quan
+Anh Le Duc
+Tran Nguyen Quang Tung
+Nhi Tran
+Luan Nguyen
+Nguyen Van Trong (RBVH/EMC)
+Nguyen Vu Quan
+Cuong Le Doan
+Vo Hoang Nam (MS/ECM)
+SonTran
+Thong Vu Duc
+Le Phuoc Phat Dat Duc
+Ly Minh Hoang
+Le Hanh Phuong Thu
+Lan Anh Tuan
+Phan Gia Hung
+Le Quang Trung
+Hai Nguyen
+Than Huynh
+Cuong Phan
+Thai Quang Quy
+Ngo Quoc Duy
+Le Chi Hieu
+Duy Luu
+Kien Tran
+Viet Le
+Vo Hung Tuan - integration
+Pham Van Hung
+Bui Nguyen Hoang Yen
+Pham Xuan Dung
+Mallesh Gopalakrishna (RBEI/ECH4) Navigation HMI
+Bui Dinh Dung
+Phan Quy
+Hien Quach
+Han Van Thi
+Le Hoang Vu
+Huynh Xuan Thuong
+Huynh Tien Hung
+Le Qui Thinh (RBVH/ENG24)
+Dung Nguyen Thanh
+Le Van Hong (MS/EMC21-XC)
+Le Tuan Anh
+Phan Hieu
+Trang Pham
+Son Vu
+Nguyen Thai Duong
+Ngo Huynh Huy
+Quynh Tram
+Quan Nguyen
+Chi Vo
+Chau Tri Vu
+Nguyen Tien Duc
+Tien Vu
+Phuc Nguyen
+Khuong Nguyen
+Hanumantappa Madar
+Vuong Nguyen
+Tra Huong
+Quang Huy
+Nguyen Viet Anh
+Quang Tran
+Chau Nguyen
+Huynh Nguyen
+Chau Doan
+Luong Quach
+Le Truong Tung (RBVH/ECM33)
+SQL DB:
+Nguyen Minh Thang
+Bui Xuan Nha
+Le Hoai Thanh
+Tuan Nguyen - Integration
+Tran Minh Nhut
+Vinh Nguyen Trong
+Nguyen Trung Nghia
+Phuong Vo
+Phuoc Nguyen
+Nam Vu
+Tran Van Bat Hung
+Tran Duy Dinh
+Nguyen Duc Tung
+Anh Ngo
+Do Thanh Cong
+Nguyen Le Thanh Tung
+Huy Do Quang
+Nguyen Thi Kim Chau
+Hoa Huynh
+Ly Thien Phu
+Co Bao Hieu
+Nguyen Viet Tien
+Tran Pham Tien Phuong
+Dang Le Minh
+Cang Trieu
+Phan Nhat Chien
+Nguyen Duc Minh
+Nhan Ho
+Nguyen Duc Anh Thai
+Vo Thi Thanh Thuy
+Quyet Luu
+Nguyen Ngo Dat
+Khoa Nguyen
+Duong Quoc Loi
+VRTE Note
+Nguyen Chi Dung
+Nguyen Viet Duong
+Nguyen Thanh Dung
+Pham Quoc Vi
+Tin Tran
+HuyNN
+_LEARNING CORNER
+AGILE - SAFe - Dec 2024
+ANDROID CC14
+Android Embedded - 2024
+Autosar BSW - 2023
+ASPICE
+Autosar Architecture - 2024
+Functional Safety
+AWS & Docker
+Design Pattern - All collections
+Jenkins Local on Ubuntu 22.04
+Language L
+LeetCode
+NAVI NDS INT
+Nguyen Ngoc Trang Hanh
+Nguyen Trong Tin
+Tran Ngoc Tan (atz81hc)
+Le Huu Tien
+Tran Minh Quan
+Cao Phan Tien Dung
+Bao Nguyen
+Thong Le Trung
+Ngo Quoc An
+Pham Tan Phu
+Bui Tuan Cuong
+Phu Tuong Khoi
+Doan Le Nhat Nam
+Ngo Thai Hung
+Rahul R
+Dinh Thanh Viet
+Nguyen Hoang Linh
+Nguyen Minh Hieu
+Nguyen Quoc Dat (Dtv)
+Dang Minh Thai
+Vu Hoang Long
+Phan Tien Hung
+Tran Trung Hieu (thi4hc)
+To Yen Linh
+Nguyen Minh Man
+Do Ngoc Thanh Son
+Nguyen Manh Hung
+BuiQuangMinh
+Nguyen Trong Thu
+Anh Tra
+Nhan Huynh Duc
+Duy Hua
+Ha Nguyen
+Nguyen Minh Quan
+Anh Van Trinh
+Linh Le
+Le Duy Toan
+Le Thanh Tra
+Diem Trinh
+Hiep Luu
+Nguyễn Vũ Hoàng Long
+Thai Ke Duy
+Tran Thanh Nhi (thanhnhiel)
+Le Quang Dung
+Do Nguyen Anh Huy
+Dang Nguyen Duy
+Tran Gia Hao
+Võ Tấn Tài
+Chien Phung Van
+Pham Van Thuyet
+How-to articles
+Lesson Learnt & Best Practices
+ARC Meeting Notes
+TML and ROBFW-AIO Automation Core Framework
+BGSV-TELEMATICS
+RBVH ENG24 - Navi Team
+BGSV Japan Navigation
+BGSV CM SW Update CpM
+BGSV-ECS Navigation Platform
+BGSV - Open Source Scanning Services
+[RBVH] SystemTest - Resident Engineer
+Android Auto
+Android project
+RBVH 2W-HMI Home
+SIS-G4 Project Home Page - MS/EMC3-XC
+ECO
+OTAS Project
+Competency Development - HMI CoE - Fresher Program
+CMD-OTAS
+CMD - IPCM/AGW
+[MS/EMC-XC Internal Project] HMI Flow Simulation Tool - Home Page
+[MS/EMC-XC Internal Project][Navigation] Cooperative Build System - Home
+Configure Android Automotive OS emulator
+Product requirements
+Deleted
+EMC51-XC projects
+P33A black screen issue tickets managament
+MS/EMC25-XC
+MS/EMC21-XC
+EMC7
+Steps to capture Image Dump :
+Jenkins Asset and Solution Generation Setup
+How to make run_unit_test.py execute formatconversion unit test
+Practicing Management
+Training Management
+PDC in BGSV RNM project
+HRTA Recruitment
+Speech Validation Framework
+2WP
+EMC21 - Automation Feature Test
+SYT Automation Test
+DriveAssist KT 09/23
+Flutter Zone
+UML Diagrams (2)
+[RBJP] Japan Navigation
+VF5_RHD
+EMC - Internal Projects
+Root page for draw.io custom templates
+Android NAFW - HVAC Demo
+Create dedicated vdi image for android build
+Feature Plans for Vehicle Repair Guide
+ParkAssit redesign
+MiDAS Solution
+Renault PoC
+CDC
+Emulator Project
+Project Management
+[Car Audio] Car Ducking
+RNM Project @ BGSV EMC
+EMC - SDV
+Suzuki DA3 Android 16 Migration
+ConfigureSpace tools
+Autosar BSW - 2023
+ Edit View inline comments
+
+ Save for later Watch Share
+Pages… _LEARNING CORNER
+Translate this pageTranslate
+Analytics
+Created by Ngo Ngoc Huy (MS/EMC7-XC), last updated on 2024, Sep 24  18 minute read Current Version V 19Page Info
+1. TERM and KEYWORDs
+2. OVERVIEW
+2.1. BSW in Autosar - Why it is and top-level building blocks
+2.1.1. What is BSW
+2.1.2. BSW in Automotive
+2.2. BSW - Layered Architecture
+2.3. Communication Stack - Building blocks of communication Stacks
+2.3.1. CAN Layers architecture - Building blocks
+2.3.2. Com (Autosar COM) - Data Path
+2.3.3. Communication Manager (ComM) - Control Path
+2.3.4. ComS - Runtime: Transmission and Reception
+2.3.5. ComS - Runtime: Network Management
+2.3.6. ComS - Runtime (cont)
+2.3.7. ComS - OSEK COM Layer Model
+2.4. Diagnosis - Building blocks of diagnosis
+2.4.1. Building blocks
+2.4.2. How Diagnostic works in Automotive
+2.5. Memory Stack
+2.5.1. Building blocks
+2.5.2. EEPROM vs Flash
+2.5.3. Memory Stack since R23-11ff
+2.6. MCU Abstraction - Building blocks MCU
+2.7. Scheduling - Concept of how hard real-time is implemented
+2.8. Mode Management
+2.9. Interfacing in BSW - Rules for interfacing and interaction within BSW
+2.10. AUTOSAR in Production BBM - BOSCH
+2.11. BSW in AUTOSAR Classic Platform R21-11
+2.12. CUBAS
+2.13. Gen6 Package View
+2.14. BSW in Powertrain
+3. Additional
+3.1. Receive ticket with Compiler Merge information
+3.2. CAN protocol overview
+3.3. Autosar System services overview: Operation System, System service module
+3.4. Software architect services
+3.5. CANStack Integration on ECU
+3.6. Embedded C complication process
+3.7. CAN overview - Build up a CANoe configuration with VNBoxes.
+4. Software Sharing model in Bosch
+5. Project Autosar Introduce
+1. TERM and KEYWORDs
+ASW	Application SoftWare
+BSW	Basic SoftWare
+AUTOSAR	
+AUTomotive Open System ARchitecture
+
+I-PDU	
+Inter - Protocol Data Units
+
+PDU	
+Protocol Data Units
+
+MCU - MCAN	
+Micro-Controller Units
+
+Micro-Controller Area Network (Bosch)
+
+RTE	
+Run-Time Environment
+
+CAN	Controller Area Network
+ECU	Electronic Control Units
+CVT
+
+Continuously Variable Transmission
+DCT	Dual-Clutch Transmission
+XCP
+Universal Measurement (X) and Calibration Protocol
+FWD/RWD/AWD/4WD	Front/Rear/All/4-Wheel Drive
+CUBAS	Common UBK Basic Software - Bosch implementation of AUTOSAR
+2. OVERVIEW
+AUTOSAR (AUTomotive Open System ARchitecture)
+
+- A worldwide standard for automotive basic software in line with an architecture that eases exchange and transfer of application software components between platforms or companies.
+
+- Provides the standardized architecture together with the specifications of the basics software along with the methodology for developing embedded control units for automotive applications.
+
+- Matured over the last several years through intensive development, implementation and maintenance.
+
+- Driven by so called core partners: leading car manufacturers (BMW, Daimler, Ford, GM, PSA, Toyota, Volkswagen) together with the tier 1 suppliers Continental and Bosch. AUTOSAR in total has more than 150 companies (OEM, Tier X suppliers, SW and tool suppliers, and silicon suppliers) as members from all over the world.
+
+- The above mentioned car manufactures plan to have more than 300 Mio. electronic control units (ECU) on the road in 2016. Bosch as world leading supplier provides CUBAS as its own AUTOSAR implementation for its own products.
+
+2.1. BSW in Autosar - Why it is and top-level building blocks
+2.1.1. What is BSW
+A platform software, starting point for others can develop. Includes alot of software stacks
+
+Basic: From vehicle requirement To Software on ECU
+
+
+
+2.1.2. BSW in Automotive
+
+
+1. Marketing team or customer service, or data engineer will collect the infor from external market, divide to requirements of new vehicle or use cases.
+
+2. From perspective of user, divide to function architecture. Ex: open/close door, or complex functions (more than one ECU). Now we have 4 domains:
+
+Infotainment	EMC, entertaiment application, devices.
+Body & comfort	
+Focus within automotive design and engineering, aimed at enhancing the physical comfort, ergonomics and well-being of vehicle occupants:
+
+Seating
+Interior Materials
+Climate Control (heating, AC)
+Noise, Vibration, and Harshness (NVH)
+Ergonomics
+Ride Quality
+Safety
+Chassis	
+Various aspects related to the design, development and optimization of fundamental structure. Its skeleton of the vehicle onto which others: body, engine, suspension, drivetrain mounted.
+
+Frame Design
+Suspension System
+Steering System
+Braking System
+Safety Structures
+Chassis Dynamics
+Weight Reduction (light weight materials)
+Driving Assistant
+Powertrain	
+Responsible for generating and transmitting power from the engine to the wheels.
+
+Engine: Gas, diesel, hybrid and electric
+Transmission: manual, automatic, CVT, DCT.
+Drivetrain: FWD, RWD, AWD or 4WD, depending on the vehicle's configuration
+Exhaust System: Responsible for removing combustion, reducing harmful emissions before releasing to the atmosphere.
+Cooling System: regulates the temp of engine to prevent overheating and optimize performance. Includes radiator, coolant pump, thermostat, hoses.
+Fuel System: Storing, delivering, metering fuel to the engine for combustion. Includes fuel tank, fuel pump, fuel injectors, carburetor.
+Electrical System: Includes various such as: starter motor, alternator, battery, ECUs.
+3. From functional architecture, divides to Power Network and Communication Network - E/E: Electrical/Electronic Network
+
+4. From E/E Network, defines how many ECUs do we need, which software do we need?
+
+- Software will have group of similar functions, a little bit different but the same platform. Ex: need to contact with other ECU, control/get data from sensors.
+
+
+
+→ Group the similar software, common functions into BSW. Software in ECUs differ in ASW, same in BSW  
+2.2. BSW - Layered Architecture
+
+
+1. Basic Software: Layer from Highest Abstraction level.
+
+(Bottom to Top)
+
+- Micro-controller Abstraction Layer: Make the software independent to micro controller.
+
+- ECU Abstraction Layer: Make the software independent to ECU
+
+- Services Layer: Abstract services which ECUs can provide.
+
+2.3. Communication Stack - Building blocks of communication Stacks
+There are more than 4 bus systems: CAN (TT), LIN, FlexRay and Ethernet
+
+
+
+2.3.1. CAN Layers architecture - Building blocks
+- Purpose: Handling the complexity, easy to update, change the software inside.
+
+Communication Drivers - Layer Micro-controller Abstraction: contains internal drivers.
+
+Communication HW Abstraction - Layer Communication Hardware Abstraction: Group of modules which abstracts from the location of communication controllers and ECU hardware layout
+
+Layer Communication Services: Group of module for vehicle network communication with the CAN com system.
+
+LEFT: Data Path. How to control, transmit data, follow to the specify procedure.
+RIGHT: Control Path. How to on/off, driving scenario, validate ECU with others.
+2.3.2. Com (Autosar COM) - Data Path
+Ex: High Abstraction Level - Defines signals from excel and using python script to generated data and configuration. Change BSW faster.
+
+From upper layer to lower layer: Convert data. Signals from application layer to COM via RTE.
+
+COM:
+
+- Provides signal-oriented data interface to the RTE
+
+- Packing/unpacking of AUTOSAR signals to I-PDUs.
+
+  I-PDU is a unit of data that represents information exchanged between ECUs in a Vehicle's Communication Network, contains information: sensor data, control signals, diagnostic messages...
+
+  Data exchange, Encapsulation, Identification, Transmission, Standardization.
+
+- Provides routing of individual signals of groups of signals between different I-PDUs.
+
+PduR: (one of the most important component of BSW)
+
+- Wide ranger, Intermediate for all interaction from upper to lower and otherwise.
+
+- Like a Center of Transportation: Routing PDUs, Mapping and transformation, Configuration and Integration
+
+- Provides routing of PDUs between diffs abstract communication controllers and upper layers.
+
+- Provides TP routing on-the-fly. Transfer of TP data is started before full TP data is buffered.
+
+<BusType-CAN>Tp
+
+- The main purpose of the TP module is to segment and reassemble (CAN) I-PDUs longer than 8 bytes.
+
+- Support the transportation, send a big data, separate into small CAN frame to send/received.
+
+<CAN>If
+
+- Provides a unique interface to manage diffs hardware device types: CAN controllers and CAN transceivers used by the defined ECU hardware layout
+
+- Upper layer no need to care about ECU types (by abstraction).
+
+<Can>Driver
+
+- Abstraction of CAN controller - ECU. Its silicon level - Group of logickey ports. Software (driver) will control the micro-controller.
+
+- Each micro-controller uses different CAN driver. Most commonly in Bosch is MCAN. Next is CanExcel.
+
+
+
+
+
+2.3.3. Communication Manager (ComM) - Control Path
+ComM
+
+- Control on/off, does not handle the children. Independent with DataPath, only has a relation from Interface.
+
+- Collects the bus communication access requests from communication requestor (Apps, Complex Drivers) and coordinates the bus communication access requests.
+
+- Triggers the Start-up and Shut-down the hardware units of the communication systems.
+
+Nm
+
+- Black line means controlling via PDUs, need bus.
+
+- CanSM - local (State Manager) are controlling via Red line, inside this MCU. Only using APIs belongs to this MCU
+
+- Acts as a bus-independent adaption layer between the bus-specific Network Management modules and the Communication Manager module (ComM)
+
+- Synchronization of Network States of diffs communication channels connected to an ECU via the network managements handled by the NM Coordinator.
+
+
+
+Q: Control Path - Control State of CAN. If the Data path does not know the state of ComM. only discuss via PDU means the states do not share between DataPath and ComM.
+A: State can be provided by CANIf (abstracted from CAN Controller). If others want to know the state, will use the CANIf.
+   If CanSM already turned off this controller but continuously send the data, when CANIf send (CANiftransmit), before sending it will check the state
+   If off, don't send CANFrame and return "IsNotOK", COM will not be responsible for this CAN state.
+
+Q: Which is component for timer (schedule)?
+A: COM. It can set the timing interval. Ex: 10ms for this signal, COM will trigger the request to lower layer for sending the CAN Frame. CANIf or driver will not schedule.
+
+Q: Why there is a barrier at the bottom - State at CANIf, not upper?
+A: CANIf is the best place for saving the state of CAN Controller. Each CANSM can request to CANIf.
+   PduR doesnt care which protocol u are using now. only the target to route the PDU: up-low, peer to peer.
+
+Q: OEMs have diffs CAN Matrix (CAN DB). More explanation about input file. Ex: DBC extension.
+A: DBC is on higher abstraction layer. In Autosar, there is no definition for DBC format, only ECU abstract or system description. From this format can map into CANIf or CANDriver.
+   DBC is an abstract language, from system design, not BSW configuration. It may has a translation layer. Ex: from a message, translate to CAN HW Object or CANIf PDU,...
+   There is a specify tool (translation layer) for translating DBC into BSW Configuration Parameter (Importer). From DBC to ECU Abstract -> Configuration parameter of BSW.
+   For the CanDriver is a CAN HW Object with CANID define. For the CANIf is a CANIfRX PDU. 
+   For the PDUR, COM, signal will be translated to COM Signal or COM I-PDU and maps via PDUR to CANIfRX PDU.
+
+2.3.4. ComS - Runtime: Transmission and Reception
+- Highest is not PDU, its SystemSignal_S, will map to ISignal (Interactive) via RTE. ISignal will map to ComSignal (COM), transfer to PDU. PDU will be routed by PDUR to Can_PDU
+
+- CanPDU via CanControlDriver, to CanReceiver → CanFrames on physical network (Bus).
+
+- DataPATH - Compare with OSI Model (Layer 2, 3, 6). UBus is physical layer.
+
+OSI 7 layers
+
+2.3.5. ComS - Runtime: Network Management
+ComM: Communication Mode
+
+CanSM: CAN state machine
+
+BusTypeSM: BusType State Machine
+
+
+
+- ControlPATH no need to divide to multiple layers. Total 3 layers: ComM, CanSM, CanIf
+
+- From ComM, create users and channels (logical propagation inside BSW). Channels number ~ CanIF controller (CanSM controller)
+
+- Base on software topology, each software can be a software component (application software), or group software components to only one user.
+
+- One user can use multiple channels, one channel can use multiple users. (N-N)
+
+- From ComM and map to CanSM (channel belongs to which protocols). CanSM will be responsible for transferring API control to CanIf.
+
+- We dont know the exactly it belongs to which CanController because one ECU may have many CanController.
+
+- CanIf will know which API control CanController belongs to, when mapping between CanSM and CanIf
+
+- Responsible of ComM (not management) is represent SM and delegate this API call to BusType SM, proceed is on BusType
+
+- (*) State requests are propagated to the corresponding BusSM. ComM doesn't control the actual bus state.
+
+
+
+2.3.6. ComS - Runtime (cont)
+NM: Network Management
+
+DATAPATH:
+
+- First is AUTOSAR COM → PduR (intermediate) → CanIf → Can Driver.
+
+- CanTp appears in somecase, N-PDU appear, divide I-PDU to N-PDU or assembly N-PDU to I-PDU
+
+- J1939Tp is similar with CanTp but different ISO standard.
+
+- LIN Interface (incl LIN TP) like: wiper, door glass, seat. Not the bus topology, its master-slave → limited network
+
+- FlexRay Driver, similar to CAN Driver: safety functions with low latency, its hard to use and reducing now.
+
+- Eth Interface, similar to TCP/IP stack: has a component named socket adapter. Its used for converting socket mechanism (TCP/IP stack) to PDU mechanism of AutoSar.
+
+  Sd for Service Discovery, DoIP - Diagnostic over IP.
+
+
+DLT - Diagnostic Log and Trace
+- Bosch uses DLTViewer to get log, message via CAN, RAY, ...
+
+DCM - Diagnostic Communication Manager
+
+IPDU Multiplexer
+
+- Multiplexer and Container: Different roles in diffs scenario; divide to smaller PDU, summarize to complete container PDU and send to Bus.
+
+Secure Onboard Communication.
+
+- Data can be hacked or listened, injected, interfered. Before sending IPDU, will be encoded and decoded back.
+
+SOME/IPTP
+
+- Same as CanTP, send frame which size > 1.5kb.
+
+XCP - Universal Measurement and Calibration Protocol
+
+- Reason: Can not debug and plug debugger into housing of ECU (embedded).
+
+- Intermediate to modify a variable - measurement point from software via com bus. Need a contract with XCP: simulation, component which contributed into this memory, SW handle memory changed, which memory address.
+
+- Standardized protocol used in the automotive industry for communication between an ECU and a measurement and calibration tool
+
+- Facilitates tasks such as parameter tuning, diagnostic access, and data acquisition: development, testing, and calibration phases
+
+
+
+CONTROLPATH:
+
+- First is ComM: Delegate to each Bus SM.
+
+- NM Interface, NM Coodinator, interact with LIN Interface.
+
+- Cupas will be different than Vector.
+
+
+
+
+
+Q: CanTP (ISO) - Requirement, how many transport mechanism, which data provider?
+A: Some ISOs: ISO/DIS 15765 DoCAN: For Diagnostic over CAN for 14229. Search from https://search.bosch.com
+              ISO 20828 Certificate, ISO/SAE DIS 21434 Security, ISO 24089 OTA, ISO 22902 HMI, ASAM MCD XCP, ISO 27145 WWH-OBD, ISO 13400 DoIP
+
+
+2.3.7. ComS - OSEK COM Layer Model
+- OSEK is the foundation of AUTOSAR ComStack -  Offene Systeme und deren Schnittstellen fur die Elektronik in Kraftfahrzeugen (DE) - Open Systems and the Corresponding Interfaces for Automotive Electronics
+
+- IL: Provides OSEK COM API which contains services for the transfer (send/receive operations) of messages.
+
+       For external communication, it uses services provided by the lower layers, while internal communication is handled entirely by the IL.
+
+- NL: Handles depending on the communication protocol used. Message segmentation/recombination and acknowledgement.
+
+      Provides flow control mechanism to enable the interfacing of communication peers featuring diffs elvels of performance and capabilities.
+
+      NL uses services provided by the DLL. (1)
+
+      OSEK COM does not specify the DLL. It merely defines minimum reqs for the DLL to support all features of the IL.
+
+- DLL: Provides the upper layers w services for the unacknowledged transfer of individual data packets (frames) over a network.
+
+     Provides services for the NM.
+
+     Same with (1)
+
+
+
+2.4. Diagnosis - Building blocks of diagnosis
+2.4.1. Building blocks
+- DCM - Diagnostic Communication Manager provides a common API for diagnostic services. Its intermediate service between Bus Com. and Diagnostic Protocol.
+
+- DEM - Diagnostic Event Manager is responsible for processing and storing diagnostic events (errors) and associated FreezeFrame data. (e.g equipment wear and tear, rebound error (not validate error or not, forward error to DCM,...)
+
+- DLT - Diagnostic Log and Trace supports logging and tracing of app. It collecs user defined log messages and converts them into a standardized format.
+
+            All detected development errs in the BSW are reported to DET
+
+- DET - Default Error Tracer. Check the input, create an exception, Death Report, if out of range value, will exit. (e.g input uint8 with 255 value → exception, failure handle)
+
+Check input có nằm trong khoảng cho phép k, nếu k thì exit
+
+- Disabling of ECU functions (e.g via FIM - Function Inhibition Manager). (e.g turn off some functions to make sure the total system can work normally, one fan is failure)
+
+Khi phát hiện ECU có vấn đề, Ex: quạt điều hòa bị hư → tắt bớt tính năng hoặc downgrade instead of 100%.
+
+
+
+
+
+2.4.2. How Diagnostic works in Automotive
+DCM: Diagnostic Communication Manager.
+
+- Each OEM has their Diagnostic Tool (Except Vinfast now).
+
+- Plug DT into ECU port , Jtag? (prepared like OBD, ...), will send specific canframes, messages. Will add one protocol of OEM.
+
+- When the canframes, CAN driver → CanIf → PDUr.
+
+  From DCM, its CAN Control Driver → CanIf →  CanCP → PDUr → DCM (Only interface)
+
+- Via DSL, DSP, DSD (triangle). each has a different group of functions.
+
+Bên trái là workflow, mỗi OEM đều có diagnostic tool riêng (Vinfast chưa thấy). Khi cắm ECU vào thì k cắm dc JTAG để debug. Sẽ dùng diagnostic tool, gửi 1 số CAN Frame đặc biệt thông qua protocol đặc biệt (OBD, UDS,...).
+
+So sánh datapath CAN khi có frame đến:
+
+                  Can Controller Driver → Can IF → PDUr →
+
+Diagnostic: Can Controller Driver → Can IF → Can TP → PDUr → DCM
+
+
+
+
+
+Input is from DSL from PDUr, DSP to RTE, 
+Q: Access level, what is command?
+A: DSL (frame) -> DSD (Dispatch)
+
+
+
+
+- Log and Trace: 1 cơ chế mượn từ infortaiment. Có thể dùng CAN/Flexray
+
+
+
+2.5. Memory Stack
+2.5.1. Building blocks
+- Non-volatile memory. Data k bị clear sau 1 software reset cycle. VD 1 lỗi, event. Giữ trong suốt quá trình vận hành của ECU nên k lưu vào RAM.
+
+
+
+2.5.2. EEPROM vs Flash
+- Quản lý Non-volatile cho hiệu quả, có 2 loại
+
+EEPROM: chú trọng vào chi tiết. có thể quản lý (xóa, đọc, ghi) từng byte. Volume thấp + đắt đỏ, chi tiết cao
+
+Flash: quản lý theo block. Chi tiết thấp, Volume cao + chi phí hợp lí.
+
+Hiện tại có nhiều type vùng nhớ khác với độ linh động cao hơn. Layer architecture sẽ k stable nữa mà phải rework.
+
+
+
+
+
+- Layer architecture (few years ago). Application layer tương tác đến NvM. Trong NvM có NvBlocks
+
+Dưới có MemIf, chia ra làm EEPROM abstraction, hoặc Flash EEPROM Emulation (giả lập).
+EEProm dc quản lý trực tiếp thông qua EEProm device - SPI. Flash thì giả lập vùng nhớ EEPROM.
+
+MemIf	Memory Abstraction Interface allows the NvRAM manager to access several memory abstraction modules (FEE or EA)
+Ea	
+Fee	
+Eep	
+Fls	
+RamTst	
+FlsTst	
+
+
+2.5.3. Memory Stack since R23-11ff
+- Từ Release 2023, rework architecture có thêm những component mới. K còn đơn giản là EEPROM và Flash. Lower layer sẽ được chia ra.
+
+Thêm một horizontal component ở giữa là MEMACC (Memory access), giống PDUr (communication) và k quan tâm bên dưới có gì. Trung gian đứng giữa upper và lower.
+
+
+
+
+
+2.6. MCU Abstraction - Building blocks MCU
+- Follow to the semiconductor type (SPI, Renesas)
+
+- Abstract software to control logic gate of Micro Controller.
+
+- Bản chất đi theo semiconductor, dùng chip của Renesas thì phải dùng bộ MA tương ứng.
+
+
+
+2.7. Scheduling - Concept of how hard real-time is implemented
+- Embedded software need an Embedded OS to organize resources: memory and timing.
+
+- Like an Embedded OS, defines MainFunction().
+
+- Cần 1 Embebded OS để tổ chức resources, không gian và thời gian. Không gian là cách dùng memory ntn, thời gian là phân chia xử lí của CPU ntn.
+Scheduling đóng vai trò như 1 EOS, sẽ define những main function (DCM, CAN, COM main func). Tùy vào system req dành cho ECU đó, sẽ distribute vào những task khác nhau.
+VD: Cần chú trọng communication, cần phải đưa command func để có thể schedule signal cho khoảng thời gian 1-10ms.
+
+- Task concurrency. Nhiều task có thể cùng acccess đến resource. EOS sẽ có MainFunction riêng được schedule cho task riêng. VD sẽ provide 1 buffer tên AccessResource. Implicit hoặc explicit thì EOS sẽ cung cấp.
+
+Trước khi access sẽ được lock và release lại để đảm bảo access resource no deadlock.
+
+
+
+2.8. Mode Management
+- Hầu hết các component (Application, communication) đều cần mode management. ICU k dc dùng riêng lẻ, có nhiều sw dc đặt trên đó và cần dc tổ hợp hoạt động với các sw khác trong network
+
+- User không thể quản lý từng task trên ECU, những mode này sẽ được abstract, nếu được trigger (Mode → SW  trên các ECU), sẽ được phối hợp để hoạt động đúng chức năng dc design sẵn.
+
+- Có 3 roles cơ bản trong mode management topology:
+Requester: Có nhu cầu trigger mode change mode.
+
+Manager: Quản lý mode, chi phối và có trách nhiệm thông báo cho User
+
+User: Đôi khi Requester cũng là user.
+
+- Right, Application là mode requester và user, RTE là trung gian, BswM đánh giá mode đấy có đạt điều kiện cần để kích hoạt thay đổi mode không. 
+
+- SW component Request A1 → thông qua RTE, Mode arbitration đánh giá (thẩm phán). Nếu OK → execute 1 action. BSW sẽ thông báo lại A2 qua RTE cho các SW component khác và báo luôn cho request mode.
+
+
+
+
+
+2.9. Interfacing in BSW - Rules for interfacing and interaction within BSW
+- Dành riêng cho dev BSW.
+
+- Autosar có nhiều component → nhiều interface and func.
+- Không biết thứ tự gọi func. VD: Khi implement 1 feature, thấy có CanIf set controller mode. Hiện tại SW component muốn set controller về off. Ta có thể gọi trực tiếp CanIf Set controller mode từ SW component. 
+
+Implementation rule k sai, hiện tại deliver ECU, chỉ cần test pass. 
+
+- AUTOSAR define những loại IF khác nhau, trường hợp nào mình nên dùng IF để tương ứng với layer architecture cho trước và k violate layer architecture của AUTOSAR
+
+- Có 3 loại: Autosar IF:
+VD:COM transmit, CANIf Transmit không phải Autosar IF. Là những IF dc defined theo những quy tắc của AUTOSAR.
+
+Khi SW component muốn communicate đến các SW component khác hoặc BSW. Những IF thông qua RTE thì sẽ là AUTOSAR IF.
+
+- Standardized AUTOSAR IF: AUTOSAR sẽ define sẵn những IF cho services. VD: BSW. Context của COM.
+
+- Standardized IF: Những IF khác nhau bên trong BSW. Không cần thỏa mãn yêu cầu của RTE, Virtual functional Bus.
+Nếu làm việc với SW Component ở mức độ implementation, việc define IF có rất nhiều rules, thông thường dc đơn giản hóa bằng MATLAB.
+Những Standardized IF thường ở C level: COM signal, CANIf transmit, CANIf set controller mode, CAN Drive. AUTOSAR defined thì BSW phải có những IF này.
+
+(2) - Chỉ cần tập trung AUTOSAR prohibit những gì:
+
+- Horizontal IF: Các microcontroller processor k dc gọi lẫn nhau (AUTOSAR quy định). Chỉ 1 ngoại lệ là các configuration call out (inform) dc gọi lẫn nhau do performance issue.
+
+- Vertical IF: Không dc phép bypass 2 layer. VD: Application gọi trực tiếp CanIF set controller mode, đã bypass RTE, service, đến issue session layer. 
+Không dc gọi trực tiếp thanh ghi (Microcontroller Abstraction Layer).
+
+- AUTOSAR mong muốn user ý thức dc những limitation. Khi violate sẽ phá vỡ những cấu trúc tổng quát. Recommendation, not the fixed rule.
+
+
+
+
+
+2.10. AUTOSAR in Production BBM - BOSCH
+- BSW trong Bosch dc implemented ETAS , trước là XCE-CU, current version GEN6. 
+
+ 
+
+2.11. BSW in AUTOSAR Classic Platform R21-11
+2.12. CUBAS
+CUBAS (Common UBK Basic Software - Bosch implementation of AUTOSAR) 
+
+- Developed to be the suitable basic software for different domain specific embedded ECU systems at Bosch like engine control systems, active and passive safety systems (airbag systems, vehicle control systems), etc.
+- AUTOSAR will be introduced via CUBAS in all Bosch automotive platforms and products step-by-step. Bosch supports release 3.× based projects but focuses on release 4.0 due to a significant improvement of features.
+
+2.13. Gen6 Package View
+2.14. BSW in Powertrain
+- CUBAS được dùng ở nhiều productline, chuyên nghiệp nhất là Powertrain. Đây cũng là 1 trong những funding chính của CUBAS 
+
+- Powertrain dùng CUBAS tốt đến mức có thể chia, xé nhỏ CUBAS và đặt vào những software stack của riêng họ. Add những software khác vào powertrain stack.
+
+
+
+3. Additional
+3.1. Receive ticket with Compiler Merge information
+3.2. CAN protocol overview
+3.3. Autosar System services overview: Operation System, System service module
+3.4. Software architect services
+3.5. CANStack Integration on ECU
+3.6. Embedded C complication process
+3.7. CAN overview - Build up a CANoe configuration with VNBoxes.
+4. Software Sharing model in Bosch
+
+
+- Software Sharing model file: ASW OEM. 
+
+
+
+
+
+5. Project Autosar Introduce
+
+
+
+
+- Software sharing model 5 BOSCH.
+
+- H2 Tank ECU, vent, app sẽ control
+
+- Bosch develop BSW, điều khiển velve, BSW Bosch read and send data to application of customer.
+
+
+
+
+
+- Trái là phiên bản cũ, phía customer họ phát triển app, tốn nhiều effort cho DT Adapter.
+
+→ solution phải: giới thiệu new Software layer, reduce effort maintenance for L Adapter.
+
+
+
+
+
+- For initialize, we have software, Base-PVER, use MDGB will export PVER Obj, deliver it (confidential software in Bosch). When customer received Base PVER
+
+- Like a circle, Bosch received back the PVER Obj.
+
+
+
+- RESULT
+
+
+
+
+
+DEMO:
+
+- Customer request from app, → Perform simulated PIN. One is Application SW value control, one is AR SwSh Value → BSW control simulated Pin.
+
+
+
+Question: 
+
+1. Apply software Sharing without Autosar.
+
+
+
+
+
+
+
+
+
+
+LikeBe the first to like this
+No labelsEdit Labels
+SUBA1KOR
+Write a comment…
+© Robert Bosch GmbH
+Docupedia 9.2.7.3 Powered by Atlassian Confluence and Scroll Viewport
+Node: doc-P-FE0VM2470
+Docupedia Community
+Support
+Legal

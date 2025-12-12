@@ -1,0 +1,838 @@
+@startuml AUTOSAR_Hardware_Deep_Dive_Part2_Continuation
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 9
+skinparam packageStyle rectangle
+
+title AUTOSAR Hardware Deep Dive - Part 2: Continued from Bug Analysis
+
+' ============ CONTINUATION: BUG #5 WATCHDOG TIMING ============
+package "Bug #5: Watchdog Configuration Mismatch (CONTINUED)" as Bug5Cont #B71C1C {
+    
+    rectangle "Bug #5 Details - Timing Drift Analysis" as Bug5Detail #FF5252 {
+        note right
+            **Continuation from previous:**
+            
+            Accumulated timing measurements over 5 minutes:
+            ```
+            Time        Call Count   Actual Period   Drift
+            0 sec       0            -               0 ms
+            1 sec       100          10.000 ms       0 ms
+            60 sec      6000         10.005 ms       +30 ms
+            120 sec     12000        10.010 ms       +120 ms
+            180 sec     18000        10.012 ms       +216 ms
+            240 sec     24000        10.015 ms       +360 ms
+            300 sec     30000        10.020 ms       +600 ms
+            
+            WdgM supervision window: 1000 ms ±10%
+            Expected: 90-110 calls per second
+            
+            At 300 sec:
+            - Window timing: 1000 ms
+            - Actual calls: 94 (due to accumulated drift)
+            - Below threshold: 90 calls
+            - WdgM triggers: SUPERVISION_VIOLATION
+            ```
+            
+            **Assembly-Level Root Cause:**
+            ```
+            OS_Schedule() timing analysis:
+            
+            0x0804A000: PUSH {R4-R11, LR}        ; 9 cycles
+            0x0804A004: LDR R0, =task_list       ; 3 cycles
+            0x0804A008: BL Get_Highest_Priority  ; 150 cycles
+            0x0804A00C: CMP R0, R1               ; 1 cycle
+            0x0804A010: BEQ NO_CONTEXT_SWITCH    ; 2 cycles
+            
+            CONTEXT_SWITCH:
+            0x0804A014: PUSH {R0-R12, LR, PC}    ; Save context: 200 cycles
+            0x0804A018: STR SP, [current_task]   ; 5 cycles
+            0x0804A01C: LDR SP, [next_task]      ; 5 cycles
+            0x0804A020: POP {R0-R12, LR, PC}     ; Restore context: 200 cycles
+            
+            Total context switch: ~400 cycles @ 100 MHz = 4 µs
+            
+            **THE PROBLEM:**
+            - Context switch happens on every 10ms tick
+            - Additional latency from interrupt handling
+            - Cache misses add 50-100 cycles randomly
+            - Total jitter: 2-5 µs per call
+            - Over 300 seconds: Accumulates to milliseconds
+            ```
+            
+            **Hardware Timer Configuration Error:**
+            ```c
+            // WRONG Configuration:
+            TIM2->PSC = 9999;      // Prescaler: 100 MHz / 10000 = 10 kHz
+            TIM2->ARR = 99;        // Auto-reload: 10 kHz / 100 = 100 Hz (10ms)
+            
+            // Problem: Integer division error in clock tree
+            // Actual clock after PLL: 99.999 MHz (not exactly 100 MHz)
+            // Result: 9.9999 ms period instead of 10.000 ms
+            // Drift: -1 µs per tick
+            // Over 300 sec: 300,000 ticks × -1 µs = -300 ms!
+            
+            // CORRECT Configuration:
+            TIM2->PSC = 10000 - 1;  // Prescaler for exact 10 kHz
+            TIM2->ARR = 100 - 1;    // Auto-reload for exact 10 ms
+            
+            // OR: Use hardware RTC for absolute timing
+            // Calibrate against external crystal (32.768 kHz)
+            ```
+            
+            **Fix Applied:**
+            ```c
+            // Option 1: Increase WdgM margins
+            <WdgMAliveSupervision>
+                <WdgMExpectedAliveIndications>100</WdgMExpectedAliveIndications>
+                <WdgMMinMargin>20</WdgMMinMargin>      <!-- Was 10 -->
+                <WdgMMaxMargin>20</WdgMMaxMargin>      <!-- Was 10 -->
+                <WdgMSupervisionCycle>1000</WdgMSupervisionCycle>
+            </WdgMAliveSupervision>
+            
+            // Option 2: Periodic drift compensation
+            void OS_Tick_Compensation(void) {
+                static uint32 accumulated_error = 0;
+                
+                // Measure actual time vs expected
+                uint32 actual_time = RTC_GetTime();
+                uint32 expected_time = tick_count * 10; // 10 ms per tick
+                
+                int32 error = (int32)(actual_time - expected_time);
+                accumulated_error += error;
+                
+                // Compensate every 100 ticks (1 second)
+                if (tick_count % 100 == 0) {
+                    if (accumulated_error > 1000) {  // > 1 ms drift
+                        // Skip one tick to catch up
+                        tick_count++;
+                        accumulated_error -= 10000;
+                    } else if (accumulated_error < -1000) {
+                        // Insert extra tick to slow down
+                        OS_Delay_us(10);
+                        accumulated_error += 10000;
+                    }
+                }
+            }
+            
+            // Option 3: Watchdog kick with error correction
+            void WdgM_MainFunction(void) {
+                static uint32 last_kick_time = 0;
+                uint32 current_time = RTC_GetTime_us();
+                
+                uint32 elapsed = current_time - last_kick_time;
+                
+                // Calculate expected elapsed time
+                uint32 expected_elapsed = WdgM_cycle_time_us;
+                
+                // If within tolerance, kick watchdog
+                if (elapsed >= (expected_elapsed * 0.9) &&
+                    elapsed <= (expected_elapsed * 1.1)) {
+                    
+                    Wdg_SetTriggerCondition(0);  // Kick watchdog
+                    last_kick_time = current_time;
+                    
+                    alive_counter++;
+                } else {
+                    // Timing violation detected
+                    DEM_ReportError(WDGM_E_TIMING_VIOLATION);
+                }
+            }
+            ```
+            
+            **Production Impact:**
+            - 30,000 vehicles affected
+            - Only manifests after long drives (>5 min continuous)
+            - Highway driving most affected (constant operation)
+            - City driving OK (frequent stops reset timing)
+            
+            **Detection Timeline:**
+            - Week 1: Customer reports "car shuts down on highway"
+            - Week 2: Cannot reproduce in test lab (tests <5 min)
+            - Week 3: Long-duration test reveals timing drift
+            - Week 4: Assembly-level analysis finds root cause
+            - Week 5: Software patch deployed
+            
+            **Cost:**
+            - Investigation: $200K (4 weeks × 5 engineers)
+            - Software update: OTA for capable vehicles
+            - Dealer update: $50/vehicle × 10K old vehicles = $500K
+            - Customer compensation: $2M (towing, rentals)
+            - Total: $2.7M
+            ```
+        end note
+    }
+}
+
+' ============ BUG #6: HARDWARE HANDLER RACE ============
+package "Bug #6: Hardware Object Handler (HOH) Race Condition" as Bug6 #880E4F {
+    
+    rectangle "HOH TX/RX Race - The Microscopic Details" as Bug6Detail #AD1457 {
+        note right
+            **Description:**
+            TX confirmation arrives BEFORE TX request completes
+            
+            **Hardware Architecture:**
+            ```
+            CAN Controller Internal State Machine:
+            
+            TX Request Process:
+            ┌────────────────────────────────────────┐
+            │ 1. CPU writes to TX mailbox (RAM)     │
+            │    - 4 bus cycles @ 100 MHz = 40 ns   │
+            ├────────────────────────────────────────┤
+            │ 2. CPU writes TX request bit (TXBAR)  │
+            │    - 1 bus cycle = 10 ns               │
+            ├────────────────────────────────────────┤
+            │ 3. Write buffer drains to peripheral  │
+            │    - AHB bus latency: 2-5 cycles      │
+            │    - 20-50 ns delay                    │
+            ├────────────────────────────────────────┤
+            │ 4. CAN controller sees TX request     │
+            │    - Internal FSM update: 1 clock     │
+            │    - CAN clock @ 40 MHz = 25 ns       │
+            ├────────────────────────────────────────┤
+            │ 5. CAN controller reads mailbox       │
+            │    - Internal DMA: 4 CAN clocks       │
+            │    - 100 ns                            │
+            ├────────────────────────────────────────┤
+            │ 6. Start transmission on bus          │
+            │    - Wait for bus idle: 0-500 µs      │
+            │    - Arbitration: 0-50 µs             │
+            │    - Transmission: 200 µs (8 bytes)   │
+            └────────────────────────────────────────┘
+            
+            **THE RACE:**
+            
+            Timeline (High bus priority message):
+            
+            T=0 ns:    CPU writes mailbox[0] = 0x123
+            T=40 ns:   CPU writes TXBAR |= 0x01
+            T=50 ns:   Write buffer queued (not yet drained!)
+            
+            T=60 ns:   **INTERRUPT OCCURS** (Higher priority ISR)
+            T=70 ns:   CPU context switches to ISR
+            
+            T=100 ns:  Write buffer drains to CAN controller
+            T=125 ns:  CAN controller starts reading mailbox
+            T=225 ns:  CAN controller has data, starts arbitration
+            
+            T=250 ns:  Bus immediately idle (lucky!)
+            T=260 ns:  Our message wins arbitration (high priority ID)
+            T=460 ns:  Transmission complete! (200 µs frame time)
+            T=461 ns:  CAN controller sets TX complete flag
+            T=462 ns:  TX complete interrupt fires
+            
+            T=470 ns:  **TX ISR PREEMPTS CURRENT ISR**
+            T=480 ns:  Can_TxConfirmation_ISR() executes
+            T=490 ns:  Reads TXBRP register = 0 (TX complete)
+            T=500 ns:  Calls CanIf_TxConfirmation()
+            
+            T=1000 ns: Original high-priority ISR completes
+            T=1010 ns: CPU returns to Can_Write() function
+            T=1020 ns: Can_Write() continues executing:
+                       **Still thinks TX is pending!**
+                       Mailbox state = TX_IN_PROGRESS
+                       But hardware already sent and confirmed!
+            
+            **CORRUPTION:**
+            
+            Can_Write() at T=1020 ns:
+            - Checks mailbox_state[0] = TX_IN_PROGRESS
+            - Assumes transmission still ongoing
+            - Writes NEW data to mailbox[0] for next message
+            - But CanIf already called TxConfirmation
+            - Upper layers think OLD message confirmed
+            - Actually: NEW message will be sent
+            - COM state machine completely confused!
+            ```
+            
+            **Assembly-Level Race Analysis:**
+            ```
+            Can_Write disassembly:
+            
+            0x08010000: PUSH {R4-R6, LR}
+            0x08010004: MOV R4, R0              ; Save HTH
+            0x08010008: MOV R5, R1              ; Save PduInfo
+            
+            ; Check if mailbox free
+            0x0801000C: LDR R0, =mailbox_state
+            0x08010010: LDR R1, [R0, R4, LSL #2]
+            0x08010014: CMP R1, #MAILBOX_FREE
+            0x08010018: BNE TX_BUSY
+            
+            ; Mark as pending
+            0x0801001C: MOV R1, #TX_PENDING
+            0x08010020: STR R1, [R0, R4, LSL #2]
+            
+            ; Write to mailbox (4 stores)
+            0x08010024: LDR R0, =CAN_MSG_RAM
+            0x08010028: LDR R1, [R5, #0]        ; Load CAN ID
+            0x0801002C: STR R1, [R0, R4, LSL #4]; Store to mailbox[0]
+            0x08010030: LDR R1, [R5, #4]        ; Load DLC
+            0x08010034: STR R1, [R0, R4, LSL #4, #4]; mailbox[1]
+            ; ... (data stores)
+            
+            ; **CRITICAL SECTION STARTS HERE**
+            ; Between this instruction and TXBAR write,
+            ; interrupt can occur!
+            
+            0x08010050: LDR R0, =CAN_TXBAR
+            0x08010054: MOV R1, #1
+            0x08010058: LSL R1, R1, R4          ; Shift to mailbox bit
+            
+            ; **RACE WINDOW: 20 ns - 500 µs**
+            ; If interrupt occurs here, TX can complete
+            ; before we return!
+            
+            0x0801005C: STR R1, [R0]            ; Set TX request bit
+            
+            ; Update state to IN_PROGRESS
+            0x08010060: LDR R0, =mailbox_state
+            0x08010064: MOV R1, #TX_IN_PROGRESS
+            0x08010068: STR R1, [R0, R4, LSL #2]
+            
+            ; Return OK
+            0x0801006C: MOV R0, #E_OK
+            0x08010070: POP {R4-R6, PC}
+            
+            **THE BUG:**
+            Between 0x08010058 and 0x08010068:
+            - TXBAR written (TX triggered)
+            - Mailbox state still shows TX_PENDING
+            - Interrupt can preempt here
+            - TX complete ISR sees TX_PENDING state
+            - ISR updates state to FREE
+            - Original thread resumes
+            - Overwrites state to TX_IN_PROGRESS
+            - Now state shows IN_PROGRESS but TX already done!
+            - Next TX attempt FAILS (thinks mailbox busy)
+            ```
+            
+            **Memory Access Timeline (Cache Effects):**
+            ```
+            Detailed memory access pattern:
+            
+            T=0:    CPU writes mailbox_state[0] = TX_PENDING
+                    → Hits L1 cache (dirty)
+                    → NOT yet written to main RAM
+                    
+            T=50:   CPU writes mailbox RAM (CAN_MSG_RAM)
+                    → Memory-mapped I/O (uncached)
+                    → Directly to peripheral
+                    → Takes 4 bus cycles (40 ns)
+                    
+            T=100:  CPU writes TXBAR register
+                    → Memory-mapped I/O (uncached)
+                    → Direct peripheral access (10 ns)
+                    
+            T=150:  Interrupt occurs (TX complete)
+                    → Context switch (200 ns)
+                    
+            T=350:  TX ISR reads mailbox_state[0]
+                    → Reads from L1 cache
+                    → Sees TX_PENDING (correct!)
+                    → Updates to MAILBOX_FREE
+                    → Writes to L1 cache (dirty)
+                    
+            T=450:  TX ISR exits
+            T=650:  Original thread resumes
+            
+            T=700:  Original thread writes mailbox_state[0] = TX_IN_PROGRESS
+                    → Writes to L1 cache
+                    → OVERWRITES ISR's update!
+                    → Cache line now shows TX_IN_PROGRESS
+                    
+            T=1000: Cache line evicted (write-back)
+                    → Main RAM updated: TX_IN_PROGRESS
+                    → WRONG STATE!
+            
+            **Result:** 
+            - Mailbox state permanently corrupted
+            - Software thinks mailbox busy forever
+            - No more TX possible on this mailbox
+            - Other mailboxes exhaust
+            - Eventually: E_NOT_OK on all TX attempts
+            - Communication failure!
+            ```
+            
+            **The Microscopic Fix:**
+            ```c
+            // FIX #1: Atomic state machine with memory barriers
+            Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                     const Can_PduType* PduInfo) {
+                
+                volatile uint32* mailbox_state_ptr = &mailbox_state[Hth];
+                
+                // Disable interrupts for ENTIRE operation
+                SuspendAllInterrupts();
+                
+                // Check state
+                if (*mailbox_state_ptr != MAILBOX_FREE) {
+                    ResumeAllInterrupts();
+                    return E_NOT_OK;
+                }
+                
+                // Update state FIRST (before HW write)
+                *mailbox_state_ptr = TX_IN_PROGRESS;
+                
+                // Memory barrier (force cache write-back)
+                __DSB();
+                __ISB();
+                
+                // Write to mailbox
+                volatile uint32* mailbox = &CAN_MSG_RAM[Hth * 4];
+                mailbox[0] = PduInfo->id;
+                mailbox[1] = PduInfo->length;
+                mailbox[2] = ((uint32*)PduInfo->sdu)[0];
+                mailbox[3] = ((uint32*)PduInfo->sdu)[1];
+                
+                // Memory barrier (ensure mailbox written)
+                __DSB();
+                
+                // Trigger transmission
+                CAN->TXBAR = (1U << Hth);
+                
+                // Memory barrier (ensure TXBAR written)
+                __DSB();
+                __ISB();
+                
+                // NOW safe to enable interrupts
+                ResumeAllInterrupts();
+                
+                return E_OK;
+            }
+            
+            void Can_TxConfirmation_ISR(void) {
+                uint32 txbrp = CAN->TXBRP;  // Read which mailboxes done
+                
+                for (uint8 hth = 0; hth < NUM_TX_MAILBOXES; hth++) {
+                    if ((txbrp & (1U << hth)) == 0) {  // TX complete
+                        
+                        // Critical section for state access
+                        SuspendAllInterrupts();
+                        
+                        if (mailbox_state[hth] == TX_IN_PROGRESS) {
+                            mailbox_state[hth] = MAILBOX_FREE;
+                            
+                            // Memory barrier
+                            __DSB();
+                            
+                            ResumeAllInterrupts();
+                            
+                            // Call upper layer
+                            CanIf_TxConfirmation(hth);
+                        } else {
+                            // Unexpected state!
+                            ResumeAllInterrupts();
+                            DET_ReportError(CAN_MODULE_ID, 0, 
+                                          CAN_E_STATE_TRANSITION);
+                        }
+                    }
+                }
+            }
+            
+            // FIX #2: Use hardware semaphore (if available)
+            // Some MCUs have hardware mutex registers
+            Std_ReturnType Can_Write_HW_Mutex(...) {
+                // Acquire hardware semaphore
+                while (HWSEM->MUTEX[HTH_MUTEX] != 0) {
+                    // Spin wait (hardware guarantees atomicity)
+                }
+                
+                // Now have exclusive access
+                if (mailbox_state[Hth] != MAILBOX_FREE) {
+                    HWSEM->MUTEX[HTH_MUTEX] = 0;  // Release
+                    return E_NOT_OK;
+                }
+                
+                mailbox_state[Hth] = TX_IN_PROGRESS;
+                // ... write mailbox, trigger TX ...
+                
+                // Release hardware semaphore
+                HWSEM->MUTEX[HTH_MUTEX] = 0;
+                
+                return E_OK;
+            }
+            
+            // FIX #3: Use compare-and-swap (CAS) instruction
+            // ARM Cortex-M3+ has LDREX/STREX
+            Std_ReturnType Can_Write_CAS(...) {
+                uint32 expected = MAILBOX_FREE;
+                uint32 desired = TX_IN_PROGRESS;
+                
+                // Atomic compare-and-swap
+                uint32 old_value;
+                do {
+                    old_value = __LDREXW(&mailbox_state[Hth]);
+                    
+                    if (old_value != expected) {
+                        __CLREX();  // Clear exclusive monitor
+                        return E_NOT_OK;
+                    }
+                } while (__STREXW(desired, &mailbox_state[Hth]) != 0);
+                
+                // Successfully updated state atomically
+                // Now safe to write mailbox
+                // ... (rest of code)
+                
+                return E_OK;
+            }
+            ```
+            
+            **Production Impact:**
+            - 8,000 ECUs affected
+            - Symptom: "CAN messages stop after random time"
+            - Appears only under HIGH bus load (>70%)
+            - Requires specific timing: Fast CPU + Slow bus
+            - Caught during long-term stress testing (72 hours)
+            
+            **Cost:**
+            - 6 weeks to isolate (intermittent, timing-dependent)
+            - Logic analyzer required (caught 1 in 10,000 occurrences)
+            - Assembly-level debugging
+            - Software patch + extensive re-validation
+            - $800K total cost
+            
+            **Lesson Learned:**
+            - NEVER assume atomic operations on shared variables
+            - ALWAYS use proper synchronization primitives
+            - Memory barriers are MANDATORY for peripheral access
+            - Test with high CPU load + high bus load
+            - Enable CPU trace for production debugging
+            ```
+        end note
+    }
+}
+
+' ============ BUG #7: HARDWARE FILTER ALIASING ============
+package "Bug #7: Hardware Filter Aliasing - The Hidden Acceptance" as Bug7 #4A148C {
+    
+    rectangle "Filter Aliasing Bug Details" as Bug7Detail #6A1B9A {
+        note right
+            **Description:**
+            ECU accepts CAN frames it should reject
+            
+            **Hardware Filter Configuration:**
+            ```
+            CAN Controller: Bosch M_CAN (32 filter banks)
+            
+            Configuration:
+            Filter 0: Mask = 0x7FF, Code = 0x123  (Accept 0x123 only)
+            Filter 1: Mask = 0x7F0, Code = 0x120  (Accept 0x120-0x12F)
+            Filter 2: Mask = 0x700, Code = 0x100  (Accept 0x100-0x1FF)
+            Filter 3: Mask = 0x000, Code = 0x000  (Accept ALL - DEBUG)
+            
+            **THE BUG:**
+            Filter 3 was left enabled from development!
+            - Should be disabled for production
+            - Configuration management error
+            - ALL CAN IDs accepted (security bypass!)
+            ```
+            
+            **Hardware Filter Logic Gate-Level:**
+            ```
+            Silicon implementation (parallel comparators):
+            
+            Incoming CAN ID: 0x456 (not in ECU extract)
+            
+            Filter 0 Check:
+            ┌──────────────────────────────────┐
+            │ ID:   0x456 = 0100 0101 0110     │
+            │ MASK: 0x7FF = 0111 1111 1111     │
+            │ &   : 0x456 = 0100 0101 0110     │
+            │                                   │
+            │ CODE: 0x123 = 0001 0010 0011     │
+            │ MASK: 0x7FF = 0111 1111 1111     │
+            │ &   : 0x123 = 0001 0010 0011     │
+            │                                   │
+            │ 0x456 ≠ 0x123 → REJECT           │
+            └──────────────────────────────────┘
+            
+            Filter 1 Check:
+            ┌──────────────────────────────────┐
+            │ ID:   0x456 = 0100 0101 0110     │
+            │ MASK: 0x7F0 = 0111 1111 0000     │
+            │ &   : 0x450 = 0100 0101 0000     │
+            │                                   │
+            │ CODE: 0x120 = 0001 0010 0000     │
+            │ MASK: 0x7F0 = 0111 1111 0000     │
+            │ &   : 0x120 = 0001 0010 0000     │
+            │                                   │
+            │ 0x450 ≠ 0x120 → REJECT           │
+            └──────────────────────────────────┘
+            
+            Filter 2 Check:
+            ┌──────────────────────────────────┐
+            │ ID:   0x456 = 0100 0101 0110     │
+            │ MASK: 0x700 = 0111 0000 0000     │
+            │ &   : 0x400 = 0100 0000 0000     │
+            │                                   │
+            │ CODE: 0x100 = 0001 0000 0000     │
+            │ MASK: 0x700 = 0111 0000 0000     │
+            │ &   : 0x100 = 0001 0000 0000     │
+            │                                   │
+            │ 0x400 ≠ 0x100 → REJECT           │
+            └──────────────────────────────────┘
+            
+            Filter 3 Check:
+            ┌──────────────────────────────────┐
+            │ ID:   0x456 = 0100 0101 0110     │
+            │ MASK: 0x000 = 0000 0000 0000     │
+            │ &   : 0x000 = 0000 0000 0000     │
+            │                                   │
+            │ CODE: 0x000 = 0000 0000 0000     │
+            │ MASK: 0x000 = 0000 0000 0000     │
+            │ &   : 0x000 = 0000 0000 0000     │
+            │                                   │
+            │ 0x000 == 0x000 → **ACCEPT!**     │
+            └──────────────────────────────────┘
+            
+            Hardware OR gate combines all filters:
+            Filter 0 OR Filter 1 OR Filter 2 OR Filter 3
+            = FALSE OR FALSE OR FALSE OR TRUE
+            = TRUE → FRAME ACCEPTED!
+            
+            **Result:**
+            - Frame 0x456 reaches RX FIFO
+            - Software filter at CanIf REJECTS it
+            - BUT: FIFO space wasted
+            - Under high load: FIFO overflow
+            - Legitimate frames LOST
+            ```
+            
+            **Register-Level Analysis:**
+            ```
+            CAN Filter Bank 3 Registers (Base: 0x40006600):
+            
+            Offset 0x30 (Filter 3 Config):
+            Address  Value       Meaning
+            0x40006630: 0x00000001  Filter Enable = 1 ← BUG!
+            0x40006634: 0x00000000  Mask = 0x000
+            0x40006638: 0x00000000  Code = 0x000
+            0x4000663C: 0x00000000  FIFO assignment = 0
+            
+            **Should be:**
+            0x40006630: 0x00000000  Filter Enable = 0 ← DISABLED
+            
+            **How it happened:**
+            
+            Development phase config (CanDrv_Cfg.c):
+            ```c
+            const Can_FilterConfigType Can_FilterConfig[] = {
+                {  // Filter 0
+                    .Enable = TRUE,
+                    .Mask = 0x7FF,
+                    .Code = 0x123,
+                    .FIFO = 0
+                },
+                // ... Filters 1, 2 ...
+                {  // Filter 3 - DEBUG FILTER
+                    .Enable = TRUE,  // ← LEFT ENABLED!
+                    .Mask = 0x000,
+                    .Code = 0x000,
+                    .FIFO = 0
+                }
+            };
+            ```
+            
+            Production build should have:
+            ```c
+            #ifdef DEBUG_BUILD
+                {  // Filter 3 - DEBUG FILTER
+                    .Enable = TRUE,
+                    .Mask = 0x000,
+                    .Code = 0x000,
+                    .FIFO = 0
+                }
+            #else
+                {  // Filter 3 - DISABLED
+                    .Enable = FALSE,
+                    .Mask = 0x000,
+                    .Code = 0x000,
+                    .FIFO = 0
+                }
+            #endif
+            ```
+            
+            **But:**
+            - Preprocessor directive missing
+            - Configuration copied from debug to production
+            - Code review missed it (buried in large file)
+            - No automated check for "accept-all" filters
+            ```
+            
+            **Assembly Verification:**
+            ```
+            Can_Init() disassembly:
+            
+            0x08020000: PUSH {R4-R6, LR}
+            0x08020004: LDR R0, =Can_FilterConfig
+            0x08020008: MOV R4, #0              ; filter_idx = 0
+            
+            FILTER_LOOP:
+            0x0802000C: LDR R1, [R0, R4, LSL #4]; Load filter config
+            0x08020010: LDR R2, [R1, #0]        ; Load Enable field
+            0x08020014: CMP R2, #0
+            0x08020018: BEQ SKIP_FILTER
+            
+            ; Filter enabled, configure it
+            0x0802001C: LDR R3, =CAN_FILTER_BASE
+            0x08020020: ADD R3, R3, R4, LSL #4  ; Calculate register address
+            0x08020024: LDR R5, [R1, #4]        ; Load Mask
+            0x08020028: STR R5, [R3, #4]        ; Write to MASK register
+            0x0802002C: LDR R5, [R1, #8]        ; Load Code
+            0x08020030: STR R5, [R3, #8]        ; Write to CODE register
+            0x08020034: MOV R5, #1
+            0x08020038: STR R5, [R3, #0]        ; Enable filter
+            
+            ; **NO CHECK FOR MASK==0 !!!**
+            ; No validation of dangerous configurations!
+            
+            SKIP_FILTER:
+            0x0802003C: ADD R4, R4, #1
+            0x08020040: CMP R4, #NUM_FILTERS
+            0x08020044: BLT FILTER_LOOP
+            
+            0x08020048: POP {R4-R6, PC}
+            ```
+            
+            **Security Impact:**
+            ```
+            Actual attack scenario that occurred:
+            
+            1. Security researcher discovers accept-all filter
+            2. Injects CAN frame with ID 0x999 (not in ECUEX)
+            3. Frame passes hardware filter (Filter 3)
+            4. CanIf software filter REJECTS (no config for 0x999)
+            5. BUT: Causes FIFO overflow under load
+            6. Legitimate safety-critical frames LOST
+            7. Result: Denial of Service (DoS) attack successful
+            
+            **Real-World Exploit:**
+            - Send 1000 invalid CAN frames/sec
+            - Each frame passes HW filter, rejected by SW filter
+            - FIFO constantly full
+            - Real frames cannot enter FIFO
+            - ECU communication DEAD
+            - Vehicle safety systems DISABLED
+            
+            **Cost of Security Vulnerability:**
+            - Security advisory issued (CVE-2023-XXXXX)
+            - Mandatory recall: All vehicles with affected ECU
+            - 100,000 vehicles × $150/update = $15M
+            - Regulatory investigation + fines: $5M
+            - Class-action lawsuit settlement: $20M
+            - Total: $40M + brand damage
+            ```
+            
+            **The Complete Fix:**
+            ```c
+            // FIX #1: Configuration validation at compile-time
+            #if defined(PRODUCTION_BUILD)
+                #define VALIDATE_FILTER_CONFIG
+            #endif
+            
+            #ifdef VALIDATE_FILTER_CONFIG
+                // Compile-time check for accept-all filters
+                #define CHECK_FILTER(idx) \
+                    _Static_assert( \
+                        (Can_FilterConfig[idx].Mask != 0x000) || \
+                        (Can_FilterConfig[idx].Enable == FALSE), \
+                        "Filter " #idx " is accept-all in production!" \
+                    )
+                
+                CHECK_FILTER(0);
+                CHECK_FILTER(1);
+                CHECK_FILTER(2);
+                CHECK_FILTER(3);  // Would FAIL compilation!
+                // ... check all filters
+            #endif
+            
+            // FIX #2: Runtime validation in Can_Init()
+            Std_ReturnType Can_Init(const Can_ConfigType* Config) {
+                for (uint8 i = 0; i < NUM_FILTERS; i++) {
+                    const Can_FilterConfigType* filter = &Config->Filters[i];
+                    
+                    if (filter->Enable == TRUE) {
+                        // Check for dangerous configurations
+                        if (filter->Mask == 0x000) {
+                            #ifdef PRODUCTION_BUILD
+                                // Production: REJECT dangerous config
+                                DET_ReportError(CAN_MODULE_ID, 0,
+                                              CAN_E_INVALID_FILTER_CONFIG);
+                                return E_NOT_OK;
+                            #else
+                                // Debug: Warn but allow
+                                DET_ReportError(CAN_MODULE_ID, 0,
+                                              CAN_E_DEBUG_FILTER_ENABLED);
+                            #endif
+                        }
+                        
+                        // Configure filter
+                        Can_SetFilter(i, filter);
+                    }
+                }
+                
+                return E_OK;
+            }
+            
+            // FIX #3: Hardware filter audit function
+            Std_ReturnType Can_AuditFilters(void) {
+                boolean filter_ok = TRUE;
+                
+                for (uint8 i = 0; i < NUM_HW_FILTERS; i++) {
+                    uint32 mask = CAN_FILTER_REG[i].MASK;
+                    uint32 enable = CAN_FILTER_REG[i].ENABLE;
+                    
+                    if ((enable == 1) && (mask == 0x000)) {
+                        // Accept-all filter detected!
+                        DEM_ReportEvent(DEM_E_SECURITY_FILTER_VIOLATION);
+                        
+                        // Disable it immediately
+                        CAN_FILTER_REG[i].ENABLE = 0;
+                        
+                        filter_ok = FALSE;
+                    }
+                }
+                
+                return filter_ok ? E_OK : E_NOT_OK;
+            }
+            
+            // FIX #4: Periodic filter verification (runtime)
+            void Can_MainFunction_FilterCheck(void) {
+                static uint32 check_counter = 0;
+                
+                check_counter++;
+                
+                // Check filters every 1 second
+                if (check_counter >= 100) {  // @ 10ms main function
+                    check_counter = 0;
+                    
+                    if (Can_AuditFilters() != E_OK) {
+                        // Filters compromised!
+                        // Possible: Memory corruption or attack
+                        
+                        // Re-initialize all filters
+                        Can_ResetFilters();
+                        
+                        // Report security event
+                        SecOC_ReportSecurityEvent(SECOC_E_FILTER_TAMPERING);
+                    }
+                }
+            }
+            ```
+            
+            **Lesson Learned:**
+            - Configuration management is CRITICAL
+            - Automated validation must catch dangerous configs
+            - Security review must check filter configurations
+            - Runtime monitoring can detect tampering
+            - Accept-all filters are NEVER acceptable in production
+            ```
+        end note
+    }
+}
+
+@enduml

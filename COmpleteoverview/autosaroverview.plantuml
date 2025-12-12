@@ -1,0 +1,218 @@
+@startuml AUTOSAR_BSW_Cause_Effect_Analysis
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 11
+skinparam packageStyle rectangle
+
+title AUTOSAR BSW - Cause & Effect Analysis with Real-World Applications
+
+' Market & Requirements Layer
+package "Market Drivers & Requirements" as Market #E3F2FD {
+    rectangle "Customer Needs" as CN #BBDEFB
+    rectangle "Safety Requirements\n(ISO 26262)" as Safety #BBDEFB
+    rectangle "Regulatory Compliance\n(Emissions, OTA)" as Regulatory #BBDEFB
+    rectangle "Competition & Innovation" as Competition #BBDEFB
+}
+
+' Functional Architecture Domain
+package "Functional Architecture (4 Domains)" as FuncArch #E8F5E9 {
+    rectangle "Infotainment\n(Entertainment, HMI)" as IVI #C8E6C9
+    rectangle "Body & Comfort\n(Climate, Seating, NVH)" as Body #C8E6C9
+    rectangle "Chassis\n(Suspension, Steering, Brakes)" as Chassis #C8E6C9
+    rectangle "Powertrain\n(Engine, Transmission, Fuel)" as Powertrain #C8E6C9
+}
+
+' E/E Architecture
+package "E/E Network Architecture" as EE #FFF3E0 {
+    rectangle "Power Distribution\nNetwork" as Power #FFE082
+    rectangle "Communication Network\n(CAN, LIN, FlexRay, Ethernet)" as CommNetwork #FFE082
+    rectangle "ECU Topology\nDefinition" as ECUTopology #FFE082
+}
+
+' AUTOSAR BSW Architecture
+package "AUTOSAR BSW - Layered Architecture" as BSW #F3E5F5 {
+    
+    package "Services Layer" as Services #E1BEE7 {
+        rectangle "Communication Services\n(COM, ComM, PduR)" as CommServices
+        rectangle "Diagnostic Services\n(DCM, DEM, DET, DLT)" as DiagServices
+        rectangle "Memory Services\n(NvM, MemIf, FEE, FLS)" as MemServices
+        rectangle "System Services\n(OS, BswM, EcuM)" as SysServices
+        rectangle "Security Services\n(SecOC, Crypto)" as SecServices
+    }
+    
+    package "ECU Abstraction Layer" as ECUAbs #CE93D8 {
+        rectangle "Communication HW Abstraction\n(CanIf, LinIf, FrIf, EthIf)" as CommHW
+        rectangle "Memory HW Abstraction\n(Ea, Fee)" as MemHW
+        rectangle "I/O HW Abstraction\n(IoHwAb)" as IOHW
+        rectangle "Onboard Device Abstraction" as DeviceAbs
+    }
+    
+    package "Microcontroller Abstraction Layer" as MCUAbs #BA68C8 {
+        rectangle "Communication Drivers\n(Can, Lin, Fr, Eth, Spi)" as CommDrivers
+        rectangle "Memory Drivers\n(Eep, Fls)" as MemDrivers
+        rectangle "I/O Drivers\n(Dio, Pwm, Adc, Icu)" as IODrivers
+        rectangle "MCU Drivers\n(Mcu, Wdg, Gpt)" as MCUDrivers
+    }
+}
+
+' Application Layer
+package "Application Software (ASW)" as ASW #E8EAF6 {
+    rectangle "Vehicle Functions\n(ACC, Lane Assist, Climate)" as VehicleFuncs #C5CAE9
+    rectangle "OEM Specific Logic" as OEMLogic #C5CAE9
+    rectangle "Safety Functions\n(ASIL-D Features)" as SafetyFuncs #C5CAE9
+}
+
+' RTE Bridge
+rectangle "AUTOSAR RTE\n(Runtime Environment)\nVirtual Function Bus" as RTE #FFF9C4
+
+' Real-World Outcomes
+package "Real-World Automotive Benefits" as Benefits #C8E6C9 {
+    rectangle "Software Reusability\n(80% BSW Reuse)" as Reuse #A5D6A7
+    rectangle "Platform Independence\n(Multi-Vendor Support)" as Platform #A5D6A7
+    rectangle "Faster Time-to-Market\n(6-12 months reduction)" as TTM #A5D6A7
+    rectangle "Cost Reduction\n(30-40% dev costs)" as Cost #A5D6A7
+    rectangle "Quality & Safety\n(ISO 26262 Compliance)" as Quality #A5D6A7
+    rectangle "OTA Updates\n(Remote SW Updates)" as OTA #A5D6A7
+    rectangle "Scalability\n(300M+ ECUs by 2025)" as Scale #A5D6A7
+}
+
+' Production Implementation
+package "Bosch CUBAS Implementation" as CUBAS #FFE0B2 {
+    rectangle "GEN6 Platform\n(Current Production)" as GEN6 #FFCC80
+    rectangle "Powertrain Solutions\n(Engine, Transmission Control)" as PTSolutions #FFCC80
+    rectangle "Software Sharing Model\n(BSW + Customer ASW)" as SWSharing #FFCC80
+}
+
+' Real ECU Examples
+package "Production ECU Examples" as ECUExamples #B2DFDB {
+    rectangle "Engine Control Unit\n(TCM, ECM)" as EngineECU #80CBC4
+    rectangle "Body Control Module\n(BCM)" as BCM #80CBC4
+    rectangle "Gateway ECU\n(Multi-Protocol)" as Gateway #80CBC4
+    rectangle "Infotainment Head Unit\n(IVI)" as IVIUnit #80CBC4
+    rectangle "ADAS ECU\n(Camera, Radar)" as ADASECU #80CBC4
+}
+
+' === CAUSE AND EFFECT RELATIONSHIPS ===
+
+' Market to Functional Architecture
+CN --> IVI : "User Experience\nRequests"
+CN --> Body : "Comfort\nRequirements"
+CN --> Chassis : "Driving Dynamics\nNeeds"
+CN --> Powertrain : "Performance &\nEfficiency Demands"
+
+Safety --> Chassis : "Braking Safety\n(ASIL-D)"
+Safety --> Powertrain : "Functional Safety\n(ASIL-C)"
+Regulatory --> Powertrain : "Emission Control\n(EURO 6)"
+Competition --> IVI : "Advanced HMI\nFeatures"
+
+' Functional Architecture to E/E
+IVI --> CommNetwork : "High Bandwidth\nNeeds (Ethernet)"
+Body --> CommNetwork : "Low Latency\n(CAN)"
+Chassis --> CommNetwork : "Real-Time\n(FlexRay)"
+Powertrain --> CommNetwork : "Reliable Comm\n(CAN-FD)"
+
+IVI --> ECUTopology : "15+ ECUs"
+Body --> ECUTopology : "10+ ECUs"
+Chassis --> ECUTopology : "8+ ECUs"
+Powertrain --> ECUTopology : "5+ ECUs"
+
+' E/E to BSW Architecture
+CommNetwork --> CommServices : "Protocol\nAbstraction"
+ECUTopology --> Services : "Standardized\nInterfaces"
+Power --> SysServices : "Power Mode\nManagement"
+
+' BSW Internal Dependencies
+CommServices --> CommHW : "Hardware\nIndependence"
+DiagServices --> CommHW : "Diagnostic\nCommunication"
+MemServices --> MemHW : "NV Data\nManagement"
+SysServices --> IOHW : "Sensor/Actuator\nControl"
+
+CommHW --> CommDrivers : "Driver\nAbstraction"
+MemHW --> MemDrivers : "Memory\nAccess"
+IOHW --> IODrivers : "Low-Level\nI/O"
+DeviceAbs --> MCUDrivers : "MCU Control"
+
+' BSW to Application
+Services -up-> RTE : "BSW Services\nAPI"
+RTE -up-> ASW : "Standardized\nInterface"
+VehicleFuncs --> RTE : "Service\nRequests"
+OEMLogic --> RTE : "Proprietary\nFunctions"
+SafetyFuncs --> RTE : "Safety-Critical\nOperations"
+
+' BSW to Benefits (EFFECTS)
+Services --> Reuse : "Standardized\nModules"
+ECUAbs --> Platform : "HW Independence"
+MCUAbs --> Platform : "MCU Independence"
+RTE --> TTM : "Faster\nIntegration"
+Services --> Cost : "Reduced Dev\nEffort"
+DiagServices --> Quality : "Early Defect\nDetection"
+SecServices --> OTA : "Secure SW\nUpdates"
+BSW --> Scale : "300M+ ECUs\nDeployed"
+
+' CUBAS Implementation
+BSW --> CUBAS : "Bosch\nImplementation"
+GEN6 --> PTSolutions : "Production\nReady"
+PTSolutions --> SWSharing : "Customer\nIntegration"
+
+' Real ECU Examples
+SWSharing --> EngineECU : "Powertrain\nControl"
+SWSharing --> BCM : "Body\nFunctions"
+SWSharing --> Gateway : "Multi-Protocol\nRouting"
+SWSharing --> IVIUnit : "Infotainment\nFeatures"
+SWSharing --> ADASECU : "Safety\nFunctions"
+
+' Benefits to Production
+Reuse --> EngineECU : "80% Code\nReuse"
+Platform --> Gateway : "Multi-Vendor\nMCU Support"
+TTM --> IVIUnit : "6 Months\nFaster Launch"
+Cost --> BCM : "40% Cost\nSaving"
+Quality --> ADASECU : "ISO 26262\nCertified"
+OTA --> IVIUnit : "Remote\nUpdates"
+
+' Critical Data Paths (Communication Stack)
+note right of CommServices
+  **Data Path Flow:**
+  Application Signal → COM
+  → PduR → CanIf 
+  → Can Driver → Physical Bus
+  
+  **Control Path Flow:**
+  ComM → CanSM 
+  → CanIf → Can Controller
+end note
+
+' Diagnostic Flow
+note right of DiagServices
+  **Diagnostic Flow:**
+  Diagnostic Tool → OBD Port
+  → CAN Bus → Can Driver
+  → CanTp → PduR → DCM
+  → DEM (Error Storage)
+  → DLT (Logging)
+end note
+
+' Memory Management
+note right of MemServices
+  **Memory Stack:**
+  Application → NvM
+  → MemIf → FEE/EA
+  → Flash/EEPROM Drivers
+  
+  **Non-Volatile Data Retention**
+end note
+
+' Legend
+legend right
+  |= Color Code |= Layer/Component |
+  | <back:#E3F2FD>   </back> | Market & Requirements |
+  | <back:#E8F5E9>   </back> | Functional Architecture |
+  | <back:#FFF3E0>   </back> | E/E Network |
+  | <back:#F3E5F5>   </back> | AUTOSAR BSW |
+  | <back:#E8EAF6>   </back> | Application Layer |
+  | <back:#C8E6C9>   </back> | Real-World Benefits |
+  | <back:#FFE0B2>   </back> | Bosch CUBAS |
+  | <back:#B2DFDB>   </back> | Production ECUs |
+endlegend
+
+@enduml

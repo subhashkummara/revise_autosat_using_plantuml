@@ -1,0 +1,3521 @@
+@startuml AUTOSAR_Hardware_Level_Deep_Dive
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 9
+skinparam packageStyle rectangle
+skinparam maxMessageSize 400
+
+title AUTOSAR COM Stack - Hardware Level Deep Dive: Mailboxes, Race Conditions & Production Bugs
+
+' ============ SILICON LEVEL - CAN CONTROLLER INTERNALS ============
+package "CAN Controller Silicon Architecture" as Silicon #FFEBEE {
+    
+    rectangle "CAN Controller Hardware Block" as CANHw #FFCDD2 {
+        note right
+            **Physical Components:**
+            
+            **1. CAN Core Module**
+            - Bit timing unit
+            - Error management unit
+            - Protocol controller FSM
+            
+            **2. Message RAM (Physical Memory)**
+            - Dedicated SRAM inside MCU
+            - Size: 2KB - 16KB typical
+            - Organized as mailboxes
+            
+            **3. Acceptance Filters (Hardware)**
+            - Parallel comparison circuits
+            - Works at wire speed (no CPU)
+            - Filter registers (silicon registers)
+            
+            **4. FIFO Buffers**
+            - Hardware managed queues
+            - Depth: 3-64 messages typical
+            
+            **5. Interrupt Controller Interface**
+            - IRQ generation logic
+            - Multiple interrupt sources
+        end note
+    }
+    
+    rectangle "Message RAM Organization" as MsgRAM #EF9A9A {
+        note right
+            **Physical Memory Layout:**
+            
+            ```
+            CAN Message RAM (Example: 4KB)
+            
+            0x0000 ┌─────────────────────────┐
+                   │  TX Mailbox 0 (16 bytes)│
+            0x0010 ├─────────────────────────┤
+                   │  TX Mailbox 1           │
+            0x0020 ├─────────────────────────┤
+                   │  TX Mailbox 2           │
+            0x0030 ├─────────────────────────┤
+                   │  ...                    │
+            0x0100 ├─────────────────────────┤
+                   │  RX FIFO 0 (64 entries) │
+                   │  (1024 bytes)           │
+            0x0500 ├─────────────────────────┤
+                   │  RX FIFO 1 (32 entries) │
+                   │  (512 bytes)            │
+            0x0700 ├─────────────────────────┤
+                   │  RX Dedicated Mailboxes │
+                   │  (Individual buffers)   │
+            0x0F00 ├─────────────────────────┤
+                   │  Filter Configuration   │
+            0x0FFF └─────────────────────────┘
+            ```
+            
+            **Each Mailbox Structure (Classic CAN):**
+            ```
+            Offset   Field           Size
+            0x00     CAN ID          4 bytes
+            0x04     DLC + Flags     4 bytes
+            0x08     Data Byte 0-3   4 bytes
+            0x0C     Data Byte 4-7   4 bytes
+            
+            Total: 16 bytes per mailbox
+            ```
+            
+            **CAN-FD Mailbox (64 byte data):**
+            ```
+            Offset   Field           Size
+            0x00     CAN ID          4 bytes
+            0x04     DLC + Flags     4 bytes
+            0x08     Data Byte 0-63  64 bytes
+            
+            Total: 72 bytes per mailbox
+            ```
+            
+            **Flags in Mailbox:**
+            - RTR (Remote Transmission Request)
+            - IDE (Extended ID)
+            - EDL (FD Format)
+            - BRS (Bit Rate Switch)
+            - ESI (Error State)
+            - Timestamp
+            - Filter Match Index
+        end note
+    }
+    
+    rectangle "Hardware Acceptance Filter" as HWAcceptFilter #E57373 {
+        note right
+            **Silicon Implementation:**
+            
+            **Filter Bank Structure:**
+            ```
+            Filter Register Pair:
+            
+            0x100: ID_MASK    = 0x7FF  (11-bit mask)
+            0x104: ID_CODE    = 0x123  (11-bit code)
+            0x108: FIFO_ASSIGN = 0     (Route to FIFO 0)
+            0x10C: FILTER_EN   = 1     (Enable)
+            
+            Hardware Comparator Logic:
+            
+            Incoming Frame:
+            ┌──────────┐
+            │ CAN ID   │──┐
+            └──────────┘  │
+                          ▼
+                    ┌─────────┐
+            MASK ──>│   AND   │
+                    └────┬────┘
+                         │
+                    ┌────▼────┐
+            CODE ──>│  EQUAL? │──> ACCEPT/REJECT
+             AND    └─────────┘
+              |
+              └───> Parallel for all filters
+            
+            **Timing: <1 bit time (sub-microsecond)**
+            ```
+            
+            **Multiple Filter Types:**
+            
+            **1. Range Filter:**
+            ```
+            Filter A: ID_LOW  = 0x100
+            Filter B: ID_HIGH = 0x1FF
+            
+            Logic: (ID >= ID_LOW) AND (ID <= ID_HIGH)
+            ```
+            
+            **2. Dual ID Filter:**
+            ```
+            Filter Register:
+            ID1 = 0x123
+            ID2 = 0x456
+            
+            Logic: (ID == ID1) OR (ID == ID2)
+            ```
+            
+            **3. Classic Mask Filter:**
+            ```
+            MASK = 0x7F0
+            CODE = 0x120
+            
+            Logic: (ID & MASK) == (CODE & MASK)
+            Accepts: 0x120 - 0x12F
+            ```
+            
+            **Filter Priority:**
+            - Multiple filters can match
+            - Lowest index wins
+            - Can route to different FIFOs
+            
+            **Filter Configuration Registers:**
+            ```
+            CAN_FILTER_CONFIG (32-bit register)
+            
+            Bit 31-16: Reserved
+            Bit 15-11: Filter Bank Number (0-31)
+            Bit 10-8:  FIFO Assignment (0-3)
+            Bit 7:     Extended ID enable
+            Bit 6:     Remote Frame filter
+            Bit 5-1:   Filter Mode
+            Bit 0:     Filter Enable
+            ```
+        end note
+    }
+    
+    rectangle "Hardware RX Process" as HWRxProcess #EF5350 {
+        note right
+            **Step-by-Step Hardware Reception:**
+            
+            **Phase 1: Frame Arrival (Physical Layer)**
+            ```
+            Time T0: Start of Frame (SOF) bit detected
+            
+            CAN Bus (Differential Voltage):
+            ━━━━━━━╲_╱━━━━━╲_╱━━━━━━━━━
+            CANH  ━━━━━━━━━━━━━━━━━━━━━━
+            CANL  ━━━╲_╱━━━━━╲_╱━━━━━━━
+            
+            Transceiver converts to logic level:
+            RX Pin: 0 1 0 0 1 1 1 ... (bit stream)
+            ```
+            
+            **Phase 2: Arbitration Field Capture**
+            ```
+            T0+1: CAN Controller samples bits
+            
+            For Standard CAN (11-bit ID):
+            Bit 0-10:  CAN Identifier
+            Bit 11:    RTR bit
+            Bit 12:    IDE bit (0 for standard)
+            Bit 13:    Reserved
+            
+            Hardware stores in temp register:
+            CAN_ID_TEMP = 0x123 (captured from bus)
+            ```
+            
+            **Phase 3: Filter Matching (PARALLEL)**
+            ```
+            T0+2: While receiving control field...
+            
+            Hardware simultaneously checks ALL filters:
+            
+            Filter 0: (0x123 & 0x7FF) == (0x123 & 0x7FF) ✓
+            Filter 1: (0x123 & 0x7F0) == (0x120 & 0x7F0) ✓
+            Filter 2: (0x123 & 0x700) == (0x200 & 0x700) ✗
+            ...
+            Filter N: ...
+            
+            Result: Filter 0 matches (lowest index)
+            Target: RX FIFO 0
+            
+            If NO filter matches:
+            → Frame reception ABORTED
+            → CAN controller ignores data field
+            → No interrupt generated
+            → CPU never involved
+            ```
+            
+            **Phase 4: Data Field Reception**
+            ```
+            T0+3: DLC captured (4 bits)
+            DLC = 8 bytes
+            
+            T0+4 to T0+(4+8*8): Data bytes sampled
+            
+            Hardware writes directly to Message RAM:
+            
+            Address 0x0100 (FIFO 0 write pointer):
+            [0x00-0x03]: 0x00000123 (CAN ID)
+            [0x04-0x07]: 0x00000008 (DLC=8, flags)
+            [0x08-0x0B]: 0xDEADBEEF (Data 0-3)
+            [0x0C-0x0F]: 0xCAFEBABE (Data 4-7)
+            
+            FIFO write pointer incremented (HW)
+            ```
+            
+            **Phase 5: CRC & ACK Check**
+            ```
+            T0+N: CRC validation (Hardware)
+            
+            If CRC mismatch:
+            → Error frame generated (HW)
+            → Message RAM entry marked invalid
+            → Error counter incremented
+            → Interrupt: CAN_IRQ_ERROR
+            
+            If CRC OK:
+            → ACK bit sent (HW automatic)
+            → End of Frame (EOF) detected
+            ```
+            
+            **Phase 6: Interrupt Generation**
+            ```
+            T0+M: Frame complete
+            
+            Hardware sets interrupt flag:
+            CAN_IR_RF0N = 1 (RX FIFO 0 New Message)
+            
+            If interrupt enabled (CAN_IE_RF0NE = 1):
+            → NVIC interrupt triggered
+            → CPU jumps to ISR
+            
+            ISR Entry Time:
+            - Interrupt latency: 1-10 µs (typical)
+            - Context save: 2-5 µs
+            - Total: 3-15 µs from EOF
+            ```
+            
+            **Critical Timing:**
+            ```
+            For 500 kbps CAN, 8-byte frame:
+            - Arbitration: 13 bits = 26 µs
+            - Control: 6 bits = 12 µs
+            - Data: 64 bits = 128 µs
+            - CRC: 16 bits = 32 µs
+            - ACK/EOF: 10 bits = 20 µs
+            
+            Total frame time: ~218 µs
+            
+            Filter decision: <26 µs (during arbitration)
+            Data to RAM: <128 µs (parallel with reception)
+            Interrupt: ~230 µs (after frame complete)
+            ```
+        end note
+    }
+    
+    rectangle "Hardware TX Process" as HWTxProcess #E53935 {
+        note right
+            **Step-by-Step Hardware Transmission:**
+            
+            **Phase 1: TX Request from Software**
+            ```
+            T0: Can_Write() called
+            
+            Software writes to TX mailbox:
+            Address 0x0010 (TX Mailbox 1):
+            [0x00]: 0x00000456 (CAN ID to send)
+            [0x04]: 0x00000008 (DLC=8)
+            [0x08]: 0x11223344 (Data 0-3)
+            [0x0C]: 0x55667788 (Data 4-7)
+            
+            Software sets TX request bit:
+            CAN_TXBAR |= (1 << 1); // TX Buffer 1 Add Request
+            
+            Register Write Time: <1 µs
+            ```
+            
+            **Phase 2: Arbitration Wait**
+            ```
+            T1: Hardware monitors bus
+            
+            CAN protocol: Wait for bus idle
+            - No frame transmission in progress
+            - Bus idle for 3 bit times (INTERMISSION)
+            
+            If bus busy:
+            → Hardware waits (automatic)
+            → No CPU involvement
+            
+            Wait time: 0 µs (if idle) to ∞ (if busy)
+            Typical: 0-500 µs
+            ```
+            
+            **Phase 3: Arbitration Phase**
+            ```
+            T2: Hardware starts transmission
+            
+            Bit-by-bit arbitration:
+            
+            Our ID:    0x456 = 0100 0101 0110
+            Other ECU: 0x123 = 0001 0010 0011
+            
+            Bus (wired-AND):
+            Bit 0: We send 0, Other sends 0 → Bus=0 ✓
+            Bit 1: We send 1, Other sends 0 → Bus=0 ✗
+            
+            We LOSE arbitration:
+            → Hardware stops transmission
+            → Switches to receiver mode
+            → Automatically retries after winner's frame
+            
+            TX Retry Count: Tracked by hardware
+            Max retries: Configurable (0-15)
+            ```
+            
+            **Phase 4: Successful Transmission**
+            ```
+            T3: Won arbitration (or retry)
+            
+            Hardware transmits:
+            - SOF: 1 bit
+            - ID: 11 bits (bit-by-bit on bus)
+            - Control: 6 bits
+            - Data: 64 bits (for DLC=8)
+            - CRC: 15 bits + delimiter
+            - ACK: 1 bit (wait for receiver ACK)
+            - EOF: 7 bits
+            
+            During transmission:
+            - Hardware monitors bus for bit errors
+            - If mismatch detected: Error frame
+            - Error counter management (automatic)
+            ```
+            
+            **Phase 5: ACK & Confirmation**
+            ```
+            T4: After ACK received
+            
+            Hardware sets TX complete flag:
+            CAN_IR_TC = 1 (Transmission Complete)
+            
+            If interrupt enabled:
+            → NVIC triggered
+            → Can_TxConfirmation_ISR() called
+            
+            Hardware clears TX request:
+            CAN_TXBAR &= ~(1 << 1);
+            
+            TX Buffer now free for next message
+            
+            Confirmation Time:
+            - From TX request to confirmation: 200-1000 µs
+            - Depends on bus load and arbitration
+            ```
+            
+            **Phase 6: Error Scenarios**
+            ```
+            **Scenario A: ACK Missing**
+            - No receiver ACKs
+            → Error frame generated (HW)
+            → TX error counter incremented
+            → Automatic retransmission (up to max)
+            
+            If max retries exceeded:
+            → CAN_IR_TXFO = 1 (TX FIFO overflow)
+            → Software notified via DET
+            
+            **Scenario B: Bit Error**
+            - Transmitted bit ≠ Bus bit
+            → Error frame immediately (HW)
+            → Retransmission scheduled
+            
+            **Scenario C: Bus Off**
+            - TX error counter > 255
+            → Hardware enters BUS OFF state
+            → All transmission stopped
+            → Software must call Can_SetControllerMode(CAN_T_START)
+            ```
+            
+            **TX Priority Handling:**
+            ```
+            Multiple TX buffers pending:
+            
+            TX Buffer 0: ID=0x123, Priority=High
+            TX Buffer 1: ID=0x456, Priority=Medium
+            TX Buffer 2: ID=0x789, Priority=Low
+            
+            Hardware arbitration:
+            - Lowest CAN ID = Highest priority (protocol)
+            - Overrides software priority configuration
+            
+            Result: 0x123 transmitted first (lowest ID)
+            
+            Some controllers support priority mailboxes:
+            - Configure TX queue with priority field
+            - HW picks highest priority for arbitration
+            ```
+        end note
+    }
+}
+
+' ============ INTERRUPT HANDLING & RACE CONDITIONS ============
+package "Interrupt Handling & Critical Sections" as ISRHandling #FFF3E0 {
+    
+    rectangle "ISR Structure & Timing" as ISRStructure #FFE082 {
+        note right
+            **CAN RX Interrupt Service Routine:**
+            
+            ```c
+            void Can_RxInterrupt_ISR(void) {
+                // Entry: ~1-5 µs interrupt latency
+                
+                // Step 1: Read interrupt source (HW register)
+                uint32 irq_status = CAN->IR;  // ~100 ns
+                
+                // Step 2: Check which FIFO triggered
+                if (irq_status & CAN_IR_RF0N) {
+                    // RX FIFO 0 new message
+                    
+                    // Step 3: Read fill level
+                    uint8 fill_level = CAN->RXF0S & 0x7F;
+                    
+                    // Step 4: Loop through available messages
+                    for (uint8 i = 0; i < fill_level; i++) {
+                        // Step 5: Get read index
+                        uint8 get_index = (CAN->RXF0S >> 8) & 0x3F;
+                        
+                        // Step 6: Calculate mailbox address
+                        uint32* mailbox = (uint32*)(MSG_RAM_BASE 
+                                        + RX_FIFO0_OFFSET 
+                                        + (get_index * 16));
+                        
+                        // Step 7: Read CAN ID (atomic 32-bit read)
+                        uint32 can_id = *mailbox;  // ~50 ns
+                        
+                        // Step 8: Read DLC & flags
+                        uint32 dlc_flags = *(mailbox + 1);
+                        uint8 dlc = dlc_flags & 0x0F;
+                        
+                        // Step 9: Copy data to local buffer
+                        uint32 data_word0 = *(mailbox + 2);
+                        uint32 data_word1 = *(mailbox + 3);
+                        
+                        // **CRITICAL: Data copy must be atomic**
+                        // If interrupted here, data can be corrupted
+                        
+                        // Step 10: Acknowledge FIFO read
+                        CAN->RXF0A = get_index;  // HW increments read ptr
+                        
+                        // Step 11: Call upper layer (CanIf)
+                        CanIf_RxIndication(
+                            Hrh,           // Hardware handle
+                            can_id,        // CAN ID
+                            dlc,           // Data length
+                            &data_buffer   // Data pointer
+                        );
+                        
+                        // CanIf processing: ~5-50 µs
+                        // - Software filter check
+                        // - PduR routing
+                        // - COM notification
+                    }
+                    
+                    // Step 12: Clear interrupt flag
+                    CAN->IR = CAN_IR_RF0N;
+                }
+                
+                // Exit: ~10-100 µs total ISR time
+                // Depends on: fill level, upper layer processing
+            }
+            ```
+            
+            **Interrupt Priority & Nesting:**
+            ```
+            NVIC Priority Levels (0 = highest):
+            
+            Level 0: Critical (Safety) - 1 µs response
+            Level 1: CAN RX/TX        - 5 µs response
+            Level 2: Timer            - 10 µs response
+            Level 3: Application      - 100 µs response
+            
+            Nesting Example:
+            
+            Timeline:
+            0 µs:   CAN RX ISR starts (Priority 1)
+            10 µs:  Timer ISR triggers (Priority 2)
+                    → Timer waits (lower priority)
+            50 µs:  CAN RX ISR completes
+            51 µs:  Timer ISR executes
+            
+            If Safety ISR (Priority 0) triggers at 20 µs:
+            20 µs:  Safety ISR preempts CAN RX ISR
+            30 µs:  Safety ISR completes
+            31 µs:  CAN RX ISR resumes
+            ```
+            
+            **ISR Timing Budget:**
+            ```
+            For 500 kbps CAN, bus load 80%:
+            
+            Frame rate: ~1800 frames/sec
+            Frame interval: ~555 µs average
+            
+            ISR must complete in <555 µs
+            Otherwise: FIFO overflow, frame loss
+            
+            Typical ISR times:
+            - Best case (1 frame): 10-20 µs
+            - Worst case (FIFO full): 100-500 µs
+            
+            FIFO depth critical:
+            - FIFO depth 3: Overflow at 3× frame rate
+            - FIFO depth 64: Handles burst traffic
+            ```
+        end note
+    }
+    
+    rectangle "Race Condition Scenarios" as RaceConditions #FFD54F {
+        note right
+            **CRITICAL RACE CONDITIONS:**
+            
+            **Race #1: FIFO Overflow (Lost Frames)**
+            ```
+            Scenario: High bus load + slow ISR processing
+            
+            T0:     Frame A arrives → FIFO[0]
+            T+200µs: Frame B arrives → FIFO[1]
+            T+400µs: Frame C arrives → FIFO[2]
+            T+500µs: ISR starts processing Frame A
+            T+600µs: Frame D arrives → FIFO[3]
+            T+700µs: ISR processing Frame B
+            T+800µs: Frame E arrives → FIFO[4] ✗ FULL!
+            
+            Hardware sets: CAN_IR_RF0L (FIFO Lost)
+            
+            Result: Frame E PERMANENTLY LOST
+            
+            Root Cause Analysis:
+            1. ISR processing too slow (>100 µs per frame)
+            2. Upper layers (CanIf, PduR, COM) called from ISR
+            3. No FIFO full threshold warning configured
+            
+            Fix Options:
+            A) Increase FIFO depth (HW config)
+            B) Use FIFO watermark interrupt (75% full)
+            C) Deferred processing (copy to SW buffer, process later)
+            D) Optimize upper layer processing
+            
+            Production Impact:
+            - Intermittent signal loss
+            - State machine timeouts
+            - User reports: "randomly not working"
+            - Difficult to reproduce in test lab
+            - Appears under real-world traffic patterns
+            ```
+            
+            **Race #2: Read-Modify-Write (Corruption)**
+            ```
+            Scenario: Two ISRs accessing same mailbox
+            
+            Thread A (CAN RX ISR):
+            T0: Read mailbox[2] = 0xDEADBEEF
+            T1: Modify data locally
+            T2: **INTERRUPTED by Thread B**
+            
+            Thread B (Main Task):
+            T2: Read mailbox[2] = 0xDEADBEEF (same data)
+            T3: Modify data locally
+            T4: Write mailbox[2] = 0xCAFEBABE
+            T5: Return
+            
+            Thread A (resumes):
+            T6: Write mailbox[2] = 0x11223344
+            
+            Result: Thread B's write LOST!
+            
+            Hardware Manifestation:
+            - Mailbox content corrupted
+            - Wrong data sent on CAN bus
+            - Receiver gets invalid CRC or data
+            
+            Real Bug Example (Production):
+            --------------------------------
+            ECU: Body Control Module (BCM)
+            Symptom: Door lock status incorrect
+            
+            Root Cause:
+            - Main task reads door lock signal (mailbox 5)
+            - CAN ISR updates mailbox 5 (new frame)
+            - Main task writes old value back
+            - Lock status reverts to old state
+            
+            Cost: 2 weeks debugging, 10,000 ECU recall
+            
+            Fix: Critical section protection
+            ```c
+            // WRONG:
+            uint8 data = mailbox[5];
+            data |= 0x01;
+            mailbox[5] = data;  // Race here!
+            
+            // CORRECT:
+            SuspendAllInterrupts();
+            uint8 data = mailbox[5];
+            data |= 0x01;
+            mailbox[5] = data;
+            ResumeAllInterrupts();
+            ```
+            ```
+            
+            **Race #3: TX Confirmation Race**
+            ```
+            Scenario: TX confirm interrupt vs. new TX request
+            
+            Thread A (App Task):
+            T0: Can_Write(Mailbox_0, Data_A)
+            T1: HW starts transmission
+            T2: **App task calls Can_Write() again**
+            T3: Check: Is Mailbox_0 free?
+                Reading: CAN_TXBRP register
+            
+            Thread B (CAN TX ISR):
+            T3.5: TX complete interrupt fires
+            T3.6: Clear TXBRP bit for Mailbox_0
+            
+            Thread A (continues):
+            T4: Reads TXBRP = 0 (free)
+            T5: Writes new data to Mailbox_0
+            
+            **BUT: ISR at T3.6 is processing old confirmation!**
+            
+            Result:
+            - CanIf_TxConfirmation() called with wrong PDU ID
+            - COM state machine confusion
+            - App thinks old message failed
+            
+            Production Bug Example:
+            ------------------------
+            ECU: Transmission Control Module (TCM)
+            Symptom: Gear shift command not acknowledged
+            
+            Timeline:
+            - App sends Gear=3
+            - Immediately sends Gear=4 (driver changed mind)
+            - TX confirm for Gear=3 arrives AFTER Gear=4 sent
+            - CanIf thinks Gear=4 confirmed
+            - COM marks Gear=3 as failed → DTC logged
+            
+            Fix: Proper mailbox state tracking
+            ```c
+            typedef enum {
+                MAILBOX_FREE,
+                MAILBOX_TX_PENDING,
+                MAILBOX_TX_IN_PROGRESS
+            } MailboxState_t;
+            
+            MailboxState_t mailbox_state[NUM_MAILBOXES];
+            
+            Can_Write() {
+                if (mailbox_state[idx] != MAILBOX_FREE) {
+                    return E_NOT_OK;  // Prevent race
+                }
+                
+                SchM_Enter_Can_EXCLUSIVE_AREA_0();
+                mailbox_state[idx] = MAILBOX_TX_PENDING;
+                // Write to HW
+                SchM_Exit_Can_EXCLUSIVE_AREA_0();
+            }
+            
+            Can_TxConfirm_ISR() {
+                SchM_Enter_Can_EXCLUSIVE_AREA_0();
+                if (mailbox_state[idx] == MAILBOX_TX_IN_PROGRESS) {
+                    mailbox_state[idx] = MAILBOX_FREE;
+                    // Notify upper layer
+                }
+                SchM_Exit_Can_EXCLUSIVE_AREA_0();
+            }
+            ```
+            ```
+            
+            **Race #4: Bus-Off Recovery Race**
+            ```
+            Scenario: Multiple threads trying to restart CAN
+            
+            Event: CAN controller enters BUS-OFF (error counter > 255)
+            
+            Thread A (Error Monitor Task):
+            T0: Detect BUS-OFF condition
+            T1: Call Can_SetControllerMode(STOP)
+            T2: Wait 1 second (recovery time)
+            T3: Call Can_SetControllerMode(START)
+            
+            Thread B (Diagnostic Task):
+            T1.5: Also detects BUS-OFF (reading same register)
+            T2.5: Call Can_SetControllerMode(STOP) - redundant!
+            T3.5: Call Can_SetControllerMode(START)
+            
+            Result:
+            - Controller restarted TWICE
+            - Second START while already running
+            - Hardware state machine confusion
+            - Possible: All TX mailboxes lost
+            
+            Real Production Issue:
+            ----------------------
+            ECU: Gateway ECU (3 CAN channels)
+            Symptom: After bus-off, some messages never sent again
+            
+            Root Cause:
+            - Two tasks restart same controller
+            - Second restart clears TX pending bits
+            - Messages queued before restart: lost forever
+            
+            Financial Impact:
+            - 50,000 ECUs in field
+            - Remote software update required
+            - Cost: $2M (update + validation + deployment)
+            
+            Fix: State machine with mutex
+            ```c
+            typedef enum {
+                CAN_STATE_UNINIT,
+                CAN_STATE_STOPPED,
+                CAN_STATE_STARTED,
+                CAN_STATE_BUSOFF,
+                CAN_STATE_RECOVERY
+            } Can_StateType;
+            
+            Can_StateType can_state[NUM_CONTROLLERS];
+            osMutexId can_mutex[NUM_CONTROLLERS];
+            
+            Can_SetControllerMode(...) {
+                osMutexWait(can_mutex[Controller], osWaitForever);
+                
+                switch (can_state[Controller]) {
+                    case CAN_STATE_BUSOFF:
+                        if (Mode == CAN_T_START) {
+                            can_state[Controller] = CAN_STATE_RECOVERY;
+                            // Perform recovery
+                            can_state[Controller] = CAN_STATE_STARTED;
+                        }
+                        break;
+                    // ...
+                }
+                
+                osMutexRelease(can_mutex[Controller]);
+            }
+            ```
+            ```
+            
+            **Race #5: Timestamp Wraparound**
+            ```
+            Scenario: 32-bit timestamp counter overflows
+            
+            CAN controller provides timestamp per message:
+            - 32-bit counter @ 40 MHz
+            - Wraparound time: 107 seconds
+            
+            T0: Frame A received, timestamp = 0xFFFFFFF0
+            T1: Frame B received, timestamp = 0x00000010 (wrapped!)
+            
+            Software calculates delta:
+            delta = TS_B - TS_A
+            delta = 0x00000010 - 0xFFFFFFF0
+            delta = 0x00000020 (32 microseconds) ✓ Correct
+            
+            But signed math:
+            delta_signed = (int32_t)(TS_B - TS_A)
+            delta_signed = (int32_t)(0x00000020)
+            delta_signed = 32 ✓
+            
+            **HOWEVER:**
+            If using:
+            if (TS_B > TS_A) {  // WRONG!
+                delta = TS_B - TS_A;
+            }
+            → FALSE after wraparound!
+            → Delta calculation fails
+            
+            Production Bug:
+            ---------------
+            ECU: ADAS Camera Module
+            Symptom: Sporadic "message too old" errors
+            
+            Root Cause:
+            - Timeout check used: (now - timestamp) > TIMEOUT
+            - After wraparound: now=0x10, timestamp=0xFFFFFFF0
+            - Calculation: 0x10 - 0xFFFFFFF0 = huge negative
+            - Interpreted as: message is from the future!
+            - Message rejected as invalid
+            
+            Fix: Use modulo arithmetic
+            ```c
+            // CORRECT:
+            uint32 delta = (TS_B - TS_A);  // Unsigned wraparound OK
+            
+            if (delta < MAX_TIMEOUT) {
+                // Message is recent
+            }
+            
+            // Also works for wraparound:
+            // TS_A = 0xFFFFFFF0
+            // TS_B = 0x00000010
+            // delta = 0x00000010 - 0xFFFFFFF0
+            //       = 0x00000020 (unsigned wraparound)
+            //       = 32 ticks ✓
+            ```
+            ```
+        end note
+    }
+    
+    rectangle "Memory Barriers & Cache Coherency" as MemoryBarriers #FFC107 {
+        note right
+            **CRITICAL: ARM Cortex Memory Model**
+            
+            **Problem: Weakly-Ordered Memory Access**
+            ```
+            ARM Cortex-M/R/A processors:
+            - Out-of-order execution
+            - Write buffering
+            - Instruction pipelining
+            
+            Consequences:
+            - Memory writes may be reordered
+            - Reads can overtake writes
+            - Cache inconsistency
+            
+            Example:
+            ```c
+            mailbox[0] = 0x12345678;  // Write A
+            mailbox[1] = 0x9ABCDEF0;  // Write B
+            CAN->TXBAR = 0x01;        // Write C (trigger TX)
+            
+            Compiler/CPU may reorder:
+            Write C executed BEFORE Write A/B!
+            → Hardware transmits OLD data from mailbox
+            → WRONG DATA ON CAN BUS
+            ```
+            ```
+            
+            **Memory Barrier Types:**
+            ```c
+            // 1. Compiler Barrier (prevents compiler reorder)
+            #define COMPILER_BARRIER() __asm__ volatile("" ::: "memory")
+            
+            // 2. Data Memory Barrier (DMB)
+            // Ensures all memory accesses before complete before after
+            #define DATA_MEMORY_BARRIER() __asm__ volatile("dmb" ::: "memory")
+            
+            // 3. Data Synchronization Barrier (DSB)
+            // Ensures all memory + instructions complete
+            #define DATA_SYNC_BARRIER() __asm__ volatile("dsb" ::: "memory")
+            
+            // 4. Instruction Synchronization Barrier (ISB)
+            // Flushes pipeline
+            #define INSTR_SYNC_BARRIER() __asm__ volatile("isb" ::: "memory")
+            ```
+            
+            **Correct CAN Write Implementation:**
+            ```c
+            Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                     const Can_PduType* PduInfo) {
+                
+                uint32* mailbox = &CAN_MSG_RAM[Hth * 4];
+                
+                // Step 1: Write CAN ID
+                mailbox[0] = PduInfo->id;
+                
+                // Step 2: Write DLC
+                mailbox[1] = (PduInfo->length & 0x0F);
+                
+                // Step 3: Write data
+                uint32* data = (uint32*)PduInfo->sdu;
+                mailbox[2] = data[0];
+                mailbox[3] = data[1];
+                
+                // **CRITICAL: Memory barrier before trigger**
+                DATA_SYNC_BARRIER();
+                
+                // Step 4: Trigger transmission
+                CAN->TXBAR = (1U << Hth);
+                
+                // DSB ensures all writes complete before TX starts
+                // Without DSB: Race between mailbox write and HW read
+                
+                return E_OK;
+            }
+            ```
+            
+            **Cache Coherency Issues:**
+            ```
+            ARM Cortex-A with Data Cache:
+            
+            Scenario: DMA + Cache enabled
+            
+            CPU writes to mailbox (cached):
+            mailbox[0] = 0x12345678;  // Stored in cache only!
+            
+            CAN controller reads via DMA:
+            - DMA bypasses cache
+            - Reads old value from RAM
+            - Transmits WRONG data
+            
+            Solution: Cache maintenance
+            ```c
+            // Before HW read (DMA TX):
+            SCB_CleanDCache_by_Addr(mailbox, size);
+            DATA_SYNC_BARRIER();
+            CAN->TXBAR = (1U << Hth);
+            
+            // After HW write (DMA RX):
+            DATA_SYNC_BARRIER();
+            SCB_InvalidateDCache_by_Addr(mailbox, size);
+            uint32 data = mailbox[0];  // Read from RAM
+            ```
+            
+            Production Bug Example:
+            -----------------------
+            Platform: ARM Cortex-A53 (Linux + AUTOSAR)
+            ECU: Infotainment Head Unit
+            
+            Symptom: 
+            - CAN messages have corrupted data
+            - Happens intermittently
+            - Only on high-end ECU variant (has cache)
+            
+            Root Cause:
+            - BSW compiled without cache maintenance
+            - Assumption: Memory mapped I/O is uncached
+            - Reality: Message RAM in cached region
+            
+            Timeline:
+            - 6 months after production start
+            - Customer complaints: "radio volume changes randomly"
+            - 3 weeks to isolate (cache-related very hard to debug)
+            - Required: BSW patch + ECU recall for critical vehicles
+            
+            Cost: $5M (investigation + fix + deployment)
+            
+            Fix: 
+            1. Move Message RAM to uncached region (MPU config)
+            2. Add explicit cache operations
+            3. Compile with -fno-strict-aliasing
+            ```
+            ```
+        end note
+    }
+}
+
+' ============ PRODUCTION BUG DATABASE ============
+package "Real Production Bugs & ECU Resets" as ProductionBugs #FFCDD2 {
+    
+    rectangle "Bug #1: Watchdog Reset Loop" as Bug1 #EF9A9A {
+        note right
+            **Description:**
+            ECU resets every 2-3 seconds in vehicle
+            
+            **Symptoms:**
+            - Instrument cluster flickers
+            - Climate control resets to default
+            - Error code: P0601 (ECU reset)
+            
+            **Root Cause Analysis (Assembly Level):**
+            ```
+            Disassembly of Can_MainFunction_Write():
+            
+            0x08001000: PUSH {R4-R11, LR}
+            0x08001004: MOV R4, #0          ; mailbox_idx = 0
+            0x08001008: LDR R5, =num_mailboxes
+            
+            LOOP:
+            0x0800100C: CMP R4, R5
+            0x08001010: BGE END_LOOP
+            
+            0x08001014: LDR R0, =mailbox_state
+            0x08001018: LDR R1, [R0, R4, LSL #2]
+            0x0800101C: CMP R1, #PENDING
+            0x08001020: BNE NEXT_MAILBOX
+            
+            ; **BUG HERE:**
+            0x08001024: BL Can_WriteSingleFrame  ; Takes 200 µs!
+            
+            0x08001028: ADD R4, R4, #1
+            0x0800102C: B LOOP
+            
+            END_LOOP:
+            0x08001030: POP {R4-R11, PC}
+            
+            **Problem:**
+            - Main function has 64 mailboxes configured
+            - Each Can_WriteSingleFrame() takes 200 µs
+            - Total loop time: 64 × 200 µs = 12.8 ms
+            
+            - Watchdog timeout: 10 ms
+            - Function exceeds watchdog window!
+            - Watchdog triggers reset
+            
+            **Why Not Caught in Testing?**
+            - Test bench: Only 10 mailboxes active
+            - 10 × 200 µs = 2 ms < 10 ms → OK
+            - Production: All 64 mailboxes used
+            - 64 × 200 µs = 12.8 ms > 10 ms → RESET
+            
+            **Fix:**
+            ```c
+            // Add watchdog kick in loop
+            for (i = 0; i < num_mailboxes; i++) {
+                if (i % 16 == 0) {
+                    Wdg_Trigger();  // Kick every 16 iterations
+                }
+                Can_WriteSingleFrame(i);
+            }
+            
+            // OR: Optimize Can_WriteSingleFrame()
+            // Reduce from 200 µs to 50 µs
+            // Total: 64 × 50 µs = 3.2 ms < 10 ms
+            ```
+            
+            **Cost Impact:**
+            - 20,000 vehicles affected
+            - Software update via dealer (no OTA capability)
+            - Customer compensation: $100/vehicle
+            - Total: $2M + reputation damage
+            ```
+        end note
+    }
+    
+    rectangle "Bug #2: Stack Overflow in ISR" as Bug2 #E57373 {
+        note right
+            **Description:**
+            Random ECU resets during high CAN traffic
+            
+            **Symptoms:**
+            - Happens during calibration (XCP traffic)
+            - Memory corruption detected
+            - HardFault exception
+            
+            **Root Cause Analysis:**
+            ```
+            Stack Dump After Crash:
+            
+            SP = 0x20007FF0 (near end of stack region)
+            Stack region: 0x20006000 - 0x20008000 (8 KB)
+            
+            Stack trace:
+            0x20007FF0: [LR] = 0x08005678 (CanIf_RxIndication)
+            0x20007FE0: [LR] = 0x0800ABCD (PduR_CanIfRxIndication)
+            0x20007FC0: [LR] = 0x08012345 (Com_RxIndication)
+            0x20007F80: [LR] = 0x08015678 (Com_UnpackSignal)
+            0x20007F00: [LR] = 0x08018ABC (memcpy)
+            ...
+            0x20006100: Stack guard pattern corrupted!
+            
+            **Problem:**
+            ISR call chain too deep:
+            
+            Can_RxISR()                     Stack: 64 bytes
+            → CanIf_RxIndication()          Stack: 128 bytes
+              → PduR_CanIfRxIndication()    Stack: 96 bytes
+                → Com_RxIndication()        Stack: 256 bytes (large frame buffer)
+                  → Com_UnpackSignal()      Stack: 512 bytes (signal buffer)
+                    → memcpy()              Stack: 32 bytes
+            
+            Total: 1088 bytes
+            
+            During high traffic:
+            - 10 frames buffered in FIFO
+            - ISR processes all in one call
+            - Stack usage: 1088 × 10 = 10,880 bytes!
+            
+            Stack size: Only 8 KB
+            → Overflow into adjacent memory
+            → Corruption of global variables
+            → HardFault
+            ```
+            
+            **Assembly Analysis:**
+            ```
+            Com_RxIndication:
+            0x08012340: PUSH {R4-R11, LR}    ; 9 regs × 4 bytes = 36 bytes
+            0x08012344: SUB SP, SP, #512     ; Local buffer = 512 bytes
+            0x08012348: MOV R4, R0           ; Copy params
+            0x0801234C: MOV R5, R1
+            
+            ; **STACK USAGE: 36 + 512 = 548 bytes**
+            ; Multiple nested calls → exceeds limit
+            
+            ; No stack overflow check!
+            ; No canary pattern!
+            ```
+            
+            **Fix:**
+            ```c
+            // Option 1: Reduce stack usage
+            // Move large buffers to global (static)
+            static uint8 signal_buffer[512];  // Not on stack
+            
+            // Option 2: Increase stack size
+            #define CAN_ISR_STACK_SIZE (16 * 1024)  // 16 KB
+            
+            // Option 3: Deferred processing
+            // Copy data to queue in ISR, process in task
+            void Can_RxISR(void) {
+                // Minimal processing
+                uint32 can_id = mailbox[0];
+                uint32 data[2] = {mailbox[2], mailbox[3]};
+                
+                // Enqueue for later processing
+                os_queue_send(can_rx_queue, &rx_frame);
+                
+                // ISR exits quickly
+            }
+            
+            void Can_ProcessTask(void) {
+                while (1) {
+                    os_queue_receive(can_rx_queue, &rx_frame);
+                    CanIf_RxIndication(...);  // Process in task context
+                }
+            }
+            
+            // Option 4: Enable stack overflow detection
+            #define configCHECK_FOR_STACK_OVERFLOW 2
+            
+            void vApplicationStackOverflowHook(TaskHandle_t xTask, 
+                                               char *pcTaskName) {
+                // Log error
+                DET_ReportError(CAN_MODULE_ID, 0, 
+                               CAN_E_STACK_OVERFLOW);
+                // Safe shutdown
+                EcuM_ShutdownOS(EcuM_GetShutdownCause());
+            }
+            ```
+            
+            **Production Impact:**
+            - 5,000 ECUs in field
+            - Affects only specific usage pattern (XCP calibration)
+            - Not caught in normal testing
+            - Discovered during customer calibration event
+            
+            **Cost:**
+            - Emergency software hotfix
+            - On-site update for all affected vehicles
+            - $500K (engineering + deployment)
+            ```
+        end note
+    }
+    
+    rectangle "Bug #3: Interrupt Priority Inversion" as Bug3 #E53935 {
+        note right
+            **Description:**
+            Critical safety function misses deadline
+            
+            **Symptoms:**
+            - ABS warning light flickers
+            - Brake assist delay (50-100 ms)
+            - Happens during heavy infotainment usage
+            
+            **Root Cause Analysis:**
+            ```
+            NVIC Priority Configuration:
+            
+            IRQ 22 (CAN0 RX):     Priority 2
+            IRQ 23 (CAN1 RX):     Priority 2
+            IRQ 45 (UART Debug):  Priority 3
+            IRQ 67 (Timer):       Priority 1
+            IRQ 89 (ADC):         Priority 4
+            
+            **Problem: Priority Inversion**
+            
+            Timeline:
+            T0:    ADC ISR starts (Priority 4, lowest)
+            T+10:  CAN0 RX frame arrives
+                   → CAN0 ISR preempts ADC (Priority 2 > 4)
+            T+20:  CAN0 ISR calls CanIf_RxIndication()
+            T+30:  CanIf acquires mutex (can_if_mutex)
+            T+40:  Timer ISR fires (Priority 1, highest)
+                   → Timer ISR preempts CAN0 ISR
+            T+50:  Timer ISR tries to send CAN frame
+                   → Calls CanIf_Transmit()
+                   → Tries to acquire can_if_mutex
+                   → **BLOCKED! Mutex held by lower priority CAN0 ISR**
+            T+60:  Timer ISR spins waiting for mutex
+            T+500: CAN0 ISR finally releases mutex
+            T+510: Timer ISR acquires mutex
+            T+520: Timer ISR completes
+            
+            **Result:**
+            - High-priority Timer ISR delayed 460 µs
+            - Timer ISR controls brake assist
+            - Brake assist deadline: 10 ms
+            - Single instance OK, but accumulated delays → miss deadline
+            
+            **Why Happened:**
+            - Mutex not priority-inheritance enabled
+            - Low-priority ISR blocks high-priority ISR
+            - Classic priority inversion problem
+            ```
+            
+            **Assembly Evidence:**
+            ```
+            Timer ISR disassembly:
+            
+            0x08020000: PUSH {R4, LR}
+            0x08020004: BL CanIf_Transmit       ; Call CanIf
+            
+            CanIf_Transmit:
+            0x08015000: PUSH {R4, LR}
+            0x08015004: LDR R0, =can_if_mutex
+            0x08015008: BL osMutexWait          ; Try acquire
+            
+            osMutexWait:
+            0x0800C000: LDR R1, [R0]            ; Check mutex owner
+            0x0800C004: CMP R1, #0
+            0x0800C008: BNE MUTEX_BLOCKED       ; Already owned
+            
+            MUTEX_BLOCKED:
+            0x0800C00C: WFI                     ; Wait for interrupt
+            0x0800C010: B osMutexWait           ; Retry (spin loop!)
+            
+            ; **SPINS UNTIL MUTEX RELEASED**
+            ; High-priority ISR blocked by low-priority ISR!
+            ```
+            
+            **Fix:**
+            ```c
+            // Option 1: Use priority inheritance mutex
+            osMutexDef(can_if_mutex_def);
+            osMutexId can_if_mutex = osMutexCreate(
+                osMutex(can_if_mutex_def)
+            );
+            
+            // Configure priority inheritance
+            osMutexSetPriorityInheritance(can_if_mutex, TRUE);
+            
+            // When low-priority task holds mutex:
+            // → Temporarily elevated to highest waiting task priority
+            // → Prevents priority inversion
+            
+            // Option 2: Disable interrupts (critical section)
+            CanIf_Transmit() {
+                __disable_irq();
+                // Access shared resources
+                __enable_irq();
+            }
+            
+            // Option 3: Use separate resources per priority
+            // High-priority ISR: Dedicated mailbox + no mutex
+            // Low-priority ISR: Shared mailboxes with mutex
+            
+            // Option 4: Make Timer ISR non-blocking
+            Timer_ISR() {
+                // Don't call CanIf directly
+                // Set flag for task to process
+                brake_assist_flag = TRUE;
+                os_semaphore_release(brake_task_sem);
+            }
+            
+            Brake_Assist_Task() {
+                while (1) {
+                    os_semaphore_wait(brake_task_sem);
+                    if (brake_assist_flag) {
+                        CanIf_Transmit(...);  // Task context OK
+                        brake_assist_flag = FALSE;
+                    }
+                }
+            }
+            ```
+            
+            **Production Impact:**
+            - Safety-critical issue (braking system)
+            - Required immediate recall notification
+            - 100,000 vehicles affected
+            - Regulatory investigation (NHTSA)
+            
+            **Cost:**
+            - Software fix: $1M engineering
+            - Recall: $50/vehicle × 100K = $5M
+            - Regulatory fines: $2M
+            - Total: $8M + brand damage
+            ```
+        end note
+    }
+    
+    rectangle "Bug #4: DMA + Cache Incoherency" as Bug4 #C62828 {
+        note right
+            **Description:**
+            CAN frames transmitted with random garbage data
+            
+            **Symptoms:**
+            - 1 in 1000 frames has corrupted bytes
+            - Only on high-performance ECU variant
+            - Cannot reproduce on test bench
+            
+            **Root Cause Analysis:**
+            ```
+            Platform: ARM Cortex-A53 @ 1.2 GHz
+            Cache: 32 KB L1 Data Cache (write-back)
+            CAN Controller: Uses DMA for message RAM access
+            
+            **Memory Map:**
+            0x40000000 - 0x4FFFFFFF: Peripheral space (uncached)
+            0x80000000 - 0x8FFFFFFF: RAM (cached, write-back)
+            
+            **Configuration Error:**
+            CAN Message RAM mapped at: 0x80010000 (CACHED!)
+            Should be: 0x40040000 (UNCACHED)
+            
+            **What Happens:**
+            
+            CPU writes frame data:
+            ```c
+            uint32* mailbox = (uint32*)0x80010000;
+            mailbox[0] = 0x12345678;  // CAN ID
+            mailbox[1] = 0x00000008;  // DLC
+            mailbox[2] = 0xDEADBEEF;  // Data 0-3
+            mailbox[3] = 0xCAFEBABE;  // Data 4-7
+            
+            // **Data stays in CPU cache (write-back policy)**
+            // Not yet written to RAM!
+            
+            // Trigger DMA
+            CAN->TXBAR = 0x01;
+            ```
+            
+            DMA reads from RAM:
+            - DMA bypasses CPU cache
+            - Reads old/uninitialized data from RAM address 0x80010000
+            - Transmits WRONG data on CAN bus
+            
+            **Why Intermittent?**
+            - Cache eviction is unpredictable
+            - Sometimes write-back happens before DMA read (lucky!)
+            - Sometimes DMA reads before write-back (BUG!)
+            - Depends on cache pressure, interrupt timing, etc.
+            
+            **Assembly Analysis:**
+            ```
+            Mailbox write code:
+            0x08010000: LDR R0, =0x80010000    ; Cached address
+            0x08010004: LDR R1, =0x12345678
+            0x08010008: STR R1, [R0]           ; Write to cache
+            
+            ; **NO cache flush here!**
+            
+            0x0801000C: LDR R0, =CAN_TXBAR
+            0x08010010: MOV R1, #1
+            0x08010014: STR R1, [R0]           ; Trigger DMA
+            
+            ; DMA may read before cache write-back!
+            ```
+            
+            **Cache State Diagram:**
+            ```
+            Time T0: CPU writes 0xDEADBEEF
+            ┌─────────────────┐
+            │  CPU L1 Cache   │
+            │  0x80010000:    │
+            │  0xDEADBEEF ✓   │ (Dirty)
+            └─────────────────┘
+            
+            ┌─────────────────┐
+            │  Main RAM       │
+            │  0x80010000:    │
+            │  0x00000000     │ (Old value)
+            └─────────────────┘
+            
+            Time T1: DMA reads for transmission
+            ┌─────────────────┐
+            │  DMA Controller │
+            │  Reads from:    │
+            │  Main RAM       │
+            │  (bypasses      │
+            │   cache)        │
+            └────────┬────────┘
+                     │
+                     ▼
+            Reads: 0x00000000 (WRONG!)
+            Transmits garbage on CAN bus
+            
+            Time T2: Cache eviction (too late)
+            Cache line written back to RAM
+            0x80010000 now = 0xDEADBEEF
+            (But frame already sent!)
+            ```
+            ```
+            
+            **Fix:**
+            ```c
+            // Option 1: Move Message RAM to uncached region
+            // Linker script change:
+            .can_msg_ram (NOLOAD) : {
+                *(.can_msg_ram)
+            } > UNCACHED_RAM AT> FLASH
+            
+            // MPU configuration:
+            MPU_Region_InitTypeDef MPU_InitStruct;
+            MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+            MPU_InitStruct.BaseAddress = 0x40040000;
+            MPU_InitStruct.Size = MPU_REGION_SIZE_64KB;
+            MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+            MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+            MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+            MPU_InitStruct.IsBufferable = MPU_ACCESS_BUFFERABLE;
+            HAL_MPU_ConfigRegion(&MPU_InitStruct);
+            
+            // Option 2: Explicit cache maintenance
+            Can_Write() {
+                // Write data to mailbox
+                mailbox[0] = 0x12345678;
+                mailbox[1] = 0x00000008;
+                mailbox[2] = 0xDEADBEEF;
+                mailbox[3] = 0xCAFEBABE;
+                
+                // **CRITICAL: Clean cache before DMA read**
+                SCB_CleanDCache_by_Addr(mailbox, 16);
+                
+                // Memory barrier
+                __DSB();
+                __ISB();
+                
+                // Now trigger DMA
+                CAN->TXBAR = 0x01;
+            }
+            
+            Can_RxISR() {
+                // **CRITICAL: Invalidate cache before CPU read**
+                SCB_InvalidateDCache_by_Addr(mailbox, 16);
+                
+                // Memory barrier
+                __DSB();
+                __ISB();
+                
+                // Now read DMA-written data
+                uint32 can_id = mailbox[0];
+                uint32 data = mailbox[2];
+            }
+            ```
+            
+            **Production Impact:**
+            - Discovered 2 months after production start
+            - Only on premium ECU variant (higher-end CPU)
+            - Intermittent → took 6 weeks to isolate
+            - Required hardware trace (logic analyzer on CAN bus)
+            
+            **Cost:**
+            - 15,000 ECUs affected
+            - Software update via OTA (fortunately available)
+            - Still required dealer visit for safety validation
+            - $750K (investigation + fix + deployment)
+            
+            **Lesson Learned:**
+            - Always verify memory regions (cached vs uncached)
+            - Use MPU to enforce memory access policies
+            - Test on all hardware variants
+            - Enable cache debug features during development
+            ```
+        end note
+    }
+    
+    rectangle "Bug #5: Watchdog Configuration Mismatch" as Bug5 #B71C1C {
+        note right
+            **Description:**
+            ECU resets after 5 minutes of operation
+            
+            **Symptoms:**
+            - Vehicle starts normally
+            - Drives fine for 5 minutes
+            - Sudden ECU reset
+            - Repeats every 5 minutes
+            
+            **Root Cause Analysis:**
+            ```
+            Watchdog Configuration:
+            
+            Hardware Watchdog (IWDG):
+            - Timeout: 10 seconds
+            - Prescaler: 256
+            - Reload: 4095
+            - Clock: LSI (32 kHz)
+            - Actual timeout: (4095 × 256) / 32000 = 32.76 seconds
+            
+            Software Watchdog (WdgM):
+            - Supervised Entity: Can_MainFunction_Write()
+            - Expected period: 10 ms
+            - Deadline: 15 ms
+            - Alive supervision timeout: 100 ms
+            
+            **THE BUG:**
+            
+            WdgM configuration:
+            ```xml
+            <WdgMSupervisedEntity>
+                <WdgMSupervisedEntityId>SE_CAN_WRITE</WdgMSupervisedEntityId>
+                <WdgMCheckpointId>CP_CAN_ENTRY</WdgMCheckpointId>
+                <WdgMCheckpointId>CP_CAN_EXIT</WdgMCheckpointId>
+            </WdgMSupervisedEntity>
+            
+            <WdgMAliveSupervision>
+                <WdgMExpectedAliveIndications>100</WdgMExpectedAliveIndications>
+                <WdgMMinMargin>10</WdgMMinMargin>
+                <WdgMMaxMargin>10</WdgMMaxMargin>
+                <WdgMSupervisionCycle>1000</WdgMSupervisionCycle> <!-- 1 sec -->
+            </WdgMAliveSupervision>
+            ```
+            
+            Can_MainFunction_Write() called every 10 ms:
+            - Per second: 100 calls expected
+            - WdgM checks alive count every 1 second
+            - Expected: 90-110 calls (margin ±10)
+            
+            **HOWEVER:**
+            After 5 minutes (300 seconds):
+            - Accumulated timing jitter: ±2 ms per call
+            - 100 calls × 2 ms = 200 ms drift
+            - At 300 seconds: 300 × 200 ms / 100 = 600 ms drift
+            
+            Actual call count in supervision cycle:
+            - Nominal: 100 calls
+            - After 5 min: 94 calls (due to drift)
+            - Below minimum margin: 90 calls
+            
+            WdgM detects: Alive supervision violation
+            → Triggers ECU reset via WdgIf
+            → Hardware watchdog reset
+            
+            **Why Not Caught Earlier?**
+            - Test duration: <5 minutes typical
+            - Problem manifests only after drift accumulation
+            - Requires long-duration test (hours)
+            ```
+            
+            **Assembly Analysis:**
+            ```
+            OS Task Scheduler (OSEK):
+            
+            Task_10ms:
+            0x08030000: PUSH {R4, LR}
+            0x08030004: BL WdgM_CheckpointReached  ; Entry checkpoint
+            0x08030008: BL Can_MainFunction_Write
+            0x0803000C: BL WdgM_CheckpointReached  ; Exit checkpoint
+            0x08030010: POP {R4, PC}
+            
+            **Timing measurement:**
+            
+            Oscilloscope on GPIO (task entry/exit):
+            
+            Call 1:   10.000 ms ✓
+            Call 2:   10.002 ms (drift +2 µs)
+            Call 3:   10.001 ms (drift +1 µs)
+            ...
+            Call 100: 10.020 ms (accumulated drift +20 µs)
+            
+            After 300 seconds:
+            - Total drift: 6 ms (300 × 20 µs)
+            - Supervision window: 1000// filepath: c:\Users\SUBA1KOR\Documents\LEARNING\AUTOSAR\COmpleteoverview\comstack_hardware_deep_dive.plantuml
+@startuml AUTOSAR_Hardware_Level_Deep_Dive
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam defaultFontSize 9
+skinparam packageStyle rectangle
+skinparam maxMessageSize 400
+
+title AUTOSAR COM Stack - Hardware Level Deep Dive: Mailboxes, Race Conditions & Production Bugs
+
+' ============ SILICON LEVEL - CAN CONTROLLER INTERNALS ============
+package "CAN Controller Silicon Architecture" as Silicon #FFEBEE {
+    
+    rectangle "CAN Controller Hardware Block" as CANHw #FFCDD2 {
+        note right
+            **Physical Components:**
+            
+            **1. CAN Core Module**
+            - Bit timing unit
+            - Error management unit
+            - Protocol controller FSM
+            
+            **2. Message RAM (Physical Memory)**
+            - Dedicated SRAM inside MCU
+            - Size: 2KB - 16KB typical
+            - Organized as mailboxes
+            
+            **3. Acceptance Filters (Hardware)**
+            - Parallel comparison circuits
+            - Works at wire speed (no CPU)
+            - Filter registers (silicon registers)
+            
+            **4. FIFO Buffers**
+            - Hardware managed queues
+            - Depth: 3-64 messages typical
+            
+            **5. Interrupt Controller Interface**
+            - IRQ generation logic
+            - Multiple interrupt sources
+        end note
+    }
+    
+    rectangle "Message RAM Organization" as MsgRAM #EF9A9A {
+        note right
+            **Physical Memory Layout:**
+            
+            ```
+            CAN Message RAM (Example: 4KB)
+            
+            0x0000 ┌─────────────────────────┐
+                   │  TX Mailbox 0 (16 bytes)│
+            0x0010 ├─────────────────────────┤
+                   │  TX Mailbox 1           │
+            0x0020 ├─────────────────────────┤
+                   │  TX Mailbox 2           │
+            0x0030 ├─────────────────────────┤
+                   │  ...                    │
+            0x0100 ├─────────────────────────┤
+                   │  RX FIFO 0 (64 entries) │
+                   │  (1024 bytes)           │
+            0x0500 ├─────────────────────────┤
+                   │  RX FIFO 1 (32 entries) │
+                   │  (512 bytes)            │
+            0x0700 ├─────────────────────────┤
+                   │  RX Dedicated Mailboxes │
+                   │  (Individual buffers)   │
+            0x0F00 ├─────────────────────────┤
+                   │  Filter Configuration   │
+            0x0FFF └─────────────────────────┘
+            ```
+            
+            **Each Mailbox Structure (Classic CAN):**
+            ```
+            Offset   Field           Size
+            0x00     CAN ID          4 bytes
+            0x04     DLC + Flags     4 bytes
+            0x08     Data Byte 0-3   4 bytes
+            0x0C     Data Byte 4-7   4 bytes
+            
+            Total: 16 bytes per mailbox
+            ```
+            
+            **CAN-FD Mailbox (64 byte data):**
+            ```
+            Offset   Field           Size
+            0x00     CAN ID          4 bytes
+            0x04     DLC + Flags     4 bytes
+            0x08     Data Byte 0-63  64 bytes
+            
+            Total: 72 bytes per mailbox
+            ```
+            
+            **Flags in Mailbox:**
+            - RTR (Remote Transmission Request)
+            - IDE (Extended ID)
+            - EDL (FD Format)
+            - BRS (Bit Rate Switch)
+            - ESI (Error State)
+            - Timestamp
+            - Filter Match Index
+        end note
+    }
+    
+    rectangle "Hardware Acceptance Filter" as HWAcceptFilter #E57373 {
+        note right
+            **Silicon Implementation:**
+            
+            **Filter Bank Structure:**
+            ```
+            Filter Register Pair:
+            
+            0x100: ID_MASK    = 0x7FF  (11-bit mask)
+            0x104: ID_CODE    = 0x123  (11-bit code)
+            0x108: FIFO_ASSIGN = 0     (Route to FIFO 0)
+            0x10C: FILTER_EN   = 1     (Enable)
+            
+            Hardware Comparator Logic:
+            
+            Incoming Frame:
+            ┌──────────┐
+            │ CAN ID   │──┐
+            └──────────┘  │
+                          ▼
+                    ┌─────────┐
+            MASK ──>│   AND   │
+                    └────┬────┘
+                         │
+                    ┌────▼────┐
+            CODE ──>│  EQUAL? │──> ACCEPT/REJECT
+             AND    └─────────┘
+              |
+              └───> Parallel for all filters
+            
+            **Timing: <1 bit time (sub-microsecond)**
+            ```
+            
+            **Multiple Filter Types:**
+            
+            **1. Range Filter:**
+            ```
+            Filter A: ID_LOW  = 0x100
+            Filter B: ID_HIGH = 0x1FF
+            
+            Logic: (ID >= ID_LOW) AND (ID <= ID_HIGH)
+            ```
+            
+            **2. Dual ID Filter:**
+            ```
+            Filter Register:
+            ID1 = 0x123
+            ID2 = 0x456
+            
+            Logic: (ID == ID1) OR (ID == ID2)
+            ```
+            
+            **3. Classic Mask Filter:**
+            ```
+            MASK = 0x7F0
+            CODE = 0x120
+            
+            Logic: (ID & MASK) == (CODE & MASK)
+            Accepts: 0x120 - 0x12F
+            ```
+            
+            **Filter Priority:**
+            - Multiple filters can match
+            - Lowest index wins
+            - Can route to different FIFOs
+            
+            **Filter Configuration Registers:**
+            ```
+            CAN_FILTER_CONFIG (32-bit register)
+            
+            Bit 31-16: Reserved
+            Bit 15-11: Filter Bank Number (0-31)
+            Bit 10-8:  FIFO Assignment (0-3)
+            Bit 7:     Extended ID enable
+            Bit 6:     Remote Frame filter
+            Bit 5-1:   Filter Mode
+            Bit 0:     Filter Enable
+            ```
+        end note
+    }
+    
+    rectangle "Hardware RX Process" as HWRxProcess #EF5350 {
+        note right
+            **Step-by-Step Hardware Reception:**
+            
+            **Phase 1: Frame Arrival (Physical Layer)**
+            ```
+            Time T0: Start of Frame (SOF) bit detected
+            
+            CAN Bus (Differential Voltage):
+            ━━━━━━━╲_╱━━━━━╲_╱━━━━━━━━━
+            CANH  ━━━━━━━━━━━━━━━━━━━━━━
+            CANL  ━━━╲_╱━━━━━╲_╱━━━━━━━
+            
+            Transceiver converts to logic level:
+            RX Pin: 0 1 0 0 1 1 1 ... (bit stream)
+            ```
+            
+            **Phase 2: Arbitration Field Capture**
+            ```
+            T0+1: CAN Controller samples bits
+            
+            For Standard CAN (11-bit ID):
+            Bit 0-10:  CAN Identifier
+            Bit 11:    RTR bit
+            Bit 12:    IDE bit (0 for standard)
+            Bit 13:    Reserved
+            
+            Hardware stores in temp register:
+            CAN_ID_TEMP = 0x123 (captured from bus)
+            ```
+            
+            **Phase 3: Filter Matching (PARALLEL)**
+            ```
+            T0+2: While receiving control field...
+            
+            Hardware simultaneously checks ALL filters:
+            
+            Filter 0: (0x123 & 0x7FF) == (0x123 & 0x7FF) ✓
+            Filter 1: (0x123 & 0x7F0) == (0x120 & 0x7F0) ✓
+            Filter 2: (0x123 & 0x700) == (0x200 & 0x700) ✗
+            ...
+            Filter N: ...
+            
+            Result: Filter 0 matches (lowest index)
+            Target: RX FIFO 0
+            
+            If NO filter matches:
+            → Frame reception ABORTED
+            → CAN controller ignores data field
+            → No interrupt generated
+            → CPU never involved
+            ```
+            
+            **Phase 4: Data Field Reception**
+            ```
+            T0+3: DLC captured (4 bits)
+            DLC = 8 bytes
+            
+            T0+4 to T0+(4+8*8): Data bytes sampled
+            
+            Hardware writes directly to Message RAM:
+            
+            Address 0x0100 (FIFO 0 write pointer):
+            [0x00-0x03]: 0x00000123 (CAN ID)
+            [0x04-0x07]: 0x00000008 (DLC=8, flags)
+            [0x08-0x0B]: 0xDEADBEEF (Data 0-3)
+            [0x0C-0x0F]: 0xCAFEBABE (Data 4-7)
+            
+            FIFO write pointer incremented (HW)
+            ```
+            
+            **Phase 5: CRC & ACK Check**
+            ```
+            T0+N: CRC validation (Hardware)
+            
+            If CRC mismatch:
+            → Error frame generated (HW)
+            → Message RAM entry marked invalid
+            → Error counter incremented
+            → Interrupt: CAN_IRQ_ERROR
+            
+            If CRC OK:
+            → ACK bit sent (HW automatic)
+            → End of Frame (EOF) detected
+            ```
+            
+            **Phase 6: Interrupt Generation**
+            ```
+            T0+M: Frame complete
+            
+            Hardware sets interrupt flag:
+            CAN_IR_RF0N = 1 (RX FIFO 0 New Message)
+            
+            If interrupt enabled (CAN_IE_RF0NE = 1):
+            → NVIC interrupt triggered
+            → CPU jumps to ISR
+            
+            ISR Entry Time:
+            - Interrupt latency: 1-10 µs (typical)
+            - Context save: 2-5 µs
+            - Total: 3-15 µs from EOF
+            ```
+            
+            **Critical Timing:**
+            ```
+            For 500 kbps CAN, 8-byte frame:
+            - Arbitration: 13 bits = 26 µs
+            - Control: 6 bits = 12 µs
+            - Data: 64 bits = 128 µs
+            - CRC: 16 bits = 32 µs
+            - ACK/EOF: 10 bits = 20 µs
+            
+            Total frame time: ~218 µs
+            
+            Filter decision: <26 µs (during arbitration)
+            Data to RAM: <128 µs (parallel with reception)
+            Interrupt: ~230 µs (after frame complete)
+            ```
+        end note
+    }
+    
+    rectangle "Hardware TX Process" as HWTxProcess #E53935 {
+        note right
+            **Step-by-Step Hardware Transmission:**
+            
+            **Phase 1: TX Request from Software**
+            ```
+            T0: Can_Write() called
+            
+            Software writes to TX mailbox:
+            Address 0x0010 (TX Mailbox 1):
+            [0x00]: 0x00000456 (CAN ID to send)
+            [0x04]: 0x00000008 (DLC=8)
+            [0x08]: 0x11223344 (Data 0-3)
+            [0x0C]: 0x55667788 (Data 4-7)
+            
+            Software sets TX request bit:
+            CAN_TXBAR |= (1 << 1); // TX Buffer 1 Add Request
+            
+            Register Write Time: <1 µs
+            ```
+            
+            **Phase 2: Arbitration Wait**
+            ```
+            T1: Hardware monitors bus
+            
+            CAN protocol: Wait for bus idle
+            - No frame transmission in progress
+            - Bus idle for 3 bit times (INTERMISSION)
+            
+            If bus busy:
+            → Hardware waits (automatic)
+            → No CPU involvement
+            
+            Wait time: 0 µs (if idle) to ∞ (if busy)
+            Typical: 0-500 µs
+            ```
+            
+            **Phase 3: Arbitration Phase**
+            ```
+            T2: Hardware starts transmission
+            
+            Bit-by-bit arbitration:
+            
+            Our ID:    0x456 = 0100 0101 0110
+            Other ECU: 0x123 = 0001 0010 0011
+            
+            Bus (wired-AND):
+            Bit 0: We send 0, Other sends 0 → Bus=0 ✓
+            Bit 1: We send 1, Other sends 0 → Bus=0 ✗
+            
+            We LOSE arbitration:
+            → Hardware stops transmission
+            → Switches to receiver mode
+            → Automatically retries after winner's frame
+            
+            TX Retry Count: Tracked by hardware
+            Max retries: Configurable (0-15)
+            ```
+            
+            **Phase 4: Successful Transmission**
+            ```
+            T3: Won arbitration (or retry)
+            
+            Hardware transmits:
+            - SOF: 1 bit
+            - ID: 11 bits (bit-by-bit on bus)
+            - Control: 6 bits
+            - Data: 64 bits (for DLC=8)
+            - CRC: 15 bits + delimiter
+            - ACK: 1 bit (wait for receiver ACK)
+            - EOF: 7 bits
+            
+            During transmission:
+            - Hardware monitors bus for bit errors
+            - If mismatch detected: Error frame
+            - Error counter management (automatic)
+            ```
+            
+            **Phase 5: ACK & Confirmation**
+            ```
+            T4: After ACK received
+            
+            Hardware sets TX complete flag:
+            CAN_IR_TC = 1 (Transmission Complete)
+            
+            If interrupt enabled:
+            → NVIC triggered
+            → Can_TxConfirmation_ISR() called
+            
+            Hardware clears TX request:
+            CAN_TXBAR &= ~(1 << 1);
+            
+            TX Buffer now free for next message
+            
+            Confirmation Time:
+            - From TX request to confirmation: 200-1000 µs
+            - Depends on bus load and arbitration
+            ```
+            
+            **Phase 6: Error Scenarios**
+            ```
+            **Scenario A: ACK Missing**
+            - No receiver ACKs
+            → Error frame generated (HW)
+            → TX error counter incremented
+            → Automatic retransmission (up to max)
+            
+            If max retries exceeded:
+            → CAN_IR_TXFO = 1 (TX FIFO overflow)
+            → Software notified via DET
+            
+            **Scenario B: Bit Error**
+            - Transmitted bit ≠ Bus bit
+            → Error frame immediately (HW)
+            → Retransmission scheduled
+            
+            **Scenario C: Bus Off**
+            - TX error counter > 255
+            → Hardware enters BUS OFF state
+            → All transmission stopped
+            → Software must call Can_SetControllerMode(CAN_T_START)
+            ```
+            
+            **TX Priority Handling:**
+            ```
+            Multiple TX buffers pending:
+            
+            TX Buffer 0: ID=0x123, Priority=High
+            TX Buffer 1: ID=0x456, Priority=Medium
+            TX Buffer 2: ID=0x789, Priority=Low
+            
+            Hardware arbitration:
+            - Lowest CAN ID = Highest priority (protocol)
+            - Overrides software priority configuration
+            
+            Result: 0x123 transmitted first (lowest ID)
+            
+            Some controllers support priority mailboxes:
+            - Configure TX queue with priority field
+            - HW picks highest priority for arbitration
+            ```
+        end note
+    }
+}
+
+' ============ INTERRUPT HANDLING & RACE CONDITIONS ============
+package "Interrupt Handling & Critical Sections" as ISRHandling #FFF3E0 {
+    
+    rectangle "ISR Structure & Timing" as ISRStructure #FFE082 {
+        note right
+            **CAN RX Interrupt Service Routine:**
+            
+            ```c
+            void Can_RxInterrupt_ISR(void) {
+                // Entry: ~1-5 µs interrupt latency
+                
+                // Step 1: Read interrupt source (HW register)
+                uint32 irq_status = CAN->IR;  // ~100 ns
+                
+                // Step 2: Check which FIFO triggered
+                if (irq_status & CAN_IR_RF0N) {
+                    // RX FIFO 0 new message
+                    
+                    // Step 3: Read fill level
+                    uint8 fill_level = CAN->RXF0S & 0x7F;
+                    
+                    // Step 4: Loop through available messages
+                    for (uint8 i = 0; i < fill_level; i++) {
+                        // Step 5: Get read index
+                        uint8 get_index = (CAN->RXF0S >> 8) & 0x3F;
+                        
+                        // Step 6: Calculate mailbox address
+                        uint32* mailbox = (uint32*)(MSG_RAM_BASE 
+                                        + RX_FIFO0_OFFSET 
+                                        + (get_index * 16));
+                        
+                        // Step 7: Read CAN ID (atomic 32-bit read)
+                        uint32 can_id = *mailbox;  // ~50 ns
+                        
+                        // Step 8: Read DLC & flags
+                        uint32 dlc_flags = *(mailbox + 1);
+                        uint8 dlc = dlc_flags & 0x0F;
+                        
+                        // Step 9: Copy data to local buffer
+                        uint32 data_word0 = *(mailbox + 2);
+                        uint32 data_word1 = *(mailbox + 3);
+                        
+                        // **CRITICAL: Data copy must be atomic**
+                        // If interrupted here, data can be corrupted
+                        
+                        // Step 10: Acknowledge FIFO read
+                        CAN->RXF0A = get_index;  // HW increments read ptr
+                        
+                        // Step 11: Call upper layer (CanIf)
+                        CanIf_RxIndication(
+                            Hrh,           // Hardware handle
+                            can_id,        // CAN ID
+                            dlc,           // Data length
+                            &data_buffer   // Data pointer
+                        );
+                        
+                        // CanIf processing: ~5-50 µs
+                        // - Software filter check
+                        // - PduR routing
+                        // - COM notification
+                    }
+                    
+                    // Step 12: Clear interrupt flag
+                    CAN->IR = CAN_IR_RF0N;
+                }
+                
+                // Exit: ~10-100 µs total ISR time
+                // Depends on: fill level, upper layer processing
+            }
+            ```
+            
+            **Interrupt Priority & Nesting:**
+            ```
+            NVIC Priority Levels (0 = highest):
+            
+            Level 0: Critical (Safety) - 1 µs response
+            Level 1: CAN RX/TX        - 5 µs response
+            Level 2: Timer            - 10 µs response
+            Level 3: Application      - 100 µs response
+            
+            Nesting Example:
+            
+            Timeline:
+            0 µs:   CAN RX ISR starts (Priority 1)
+            10 µs:  Timer ISR triggers (Priority 2)
+                    → Timer waits (lower priority)
+            50 µs:  CAN RX ISR completes
+            51 µs:  Timer ISR executes
+            
+            If Safety ISR (Priority 0) triggers at 20 µs:
+            20 µs:  Safety ISR preempts CAN RX ISR
+            30 µs:  Safety ISR completes
+            31 µs:  CAN RX ISR resumes
+            ```
+            
+            **ISR Timing Budget:**
+            ```
+            For 500 kbps CAN, bus load 80%:
+            
+            Frame rate: ~1800 frames/sec
+            Frame interval: ~555 µs average
+            
+            ISR must complete in <555 µs
+            Otherwise: FIFO overflow, frame loss
+            
+            Typical ISR times:
+            - Best case (1 frame): 10-20 µs
+            - Worst case (FIFO full): 100-500 µs
+            
+            FIFO depth critical:
+            - FIFO depth 3: Overflow at 3× frame rate
+            - FIFO depth 64: Handles burst traffic
+            ```
+        end note
+    }
+    
+    rectangle "Race Condition Scenarios" as RaceConditions #FFD54F {
+        note right
+            **CRITICAL RACE CONDITIONS:**
+            
+            **Race #1: FIFO Overflow (Lost Frames)**
+            ```
+            Scenario: High bus load + slow ISR processing
+            
+            T0:     Frame A arrives → FIFO[0]
+            T+200µs: Frame B arrives → FIFO[1]
+            T+400µs: Frame C arrives → FIFO[2]
+            T+500µs: ISR starts processing Frame A
+            T+600µs: Frame D arrives → FIFO[3]
+            T+700µs: ISR processing Frame B
+            T+800µs: Frame E arrives → FIFO[4] ✗ FULL!
+            
+            Hardware sets: CAN_IR_RF0L (FIFO Lost)
+            
+            Result: Frame E PERMANENTLY LOST
+            
+            Root Cause Analysis:
+            1. ISR processing too slow (>100 µs per frame)
+            2. Upper layers (CanIf, PduR, COM) called from ISR
+            3. No FIFO full threshold warning configured
+            
+            Fix Options:
+            A) Increase FIFO depth (HW config)
+            B) Use FIFO watermark interrupt (75% full)
+            C) Deferred processing (copy to SW buffer, process later)
+            D) Optimize upper layer processing
+            
+            Production Impact:
+            - Intermittent signal loss
+            - State machine timeouts
+            - User reports: "randomly not working"
+            - Difficult to reproduce in test lab
+            - Appears under real-world traffic patterns
+            ```
+            
+            **Race #2: Read-Modify-Write (Corruption)**
+            ```
+            Scenario: Two ISRs accessing same mailbox
+            
+            Thread A (CAN RX ISR):
+            T0: Read mailbox[2] = 0xDEADBEEF
+            T1: Modify data locally
+            T2: **INTERRUPTED by Thread B**
+            
+            Thread B (Main Task):
+            T2: Read mailbox[2] = 0xDEADBEEF (same data)
+            T3: Modify data locally
+            T4: Write mailbox[2] = 0xCAFEBABE
+            T5: Return
+            
+            Thread A (resumes):
+            T6: Write mailbox[2] = 0x11223344
+            
+            Result: Thread B's write LOST!
+            
+            Hardware Manifestation:
+            - Mailbox content corrupted
+            - Wrong data sent on CAN bus
+            - Receiver gets invalid CRC or data
+            
+            Real Bug Example (Production):
+            --------------------------------
+            ECU: Body Control Module (BCM)
+            Symptom: Door lock status incorrect
+            
+            Root Cause:
+            - Main task reads door lock signal (mailbox 5)
+            - CAN ISR updates mailbox 5 (new frame)
+            - Main task writes old value back
+            - Lock status reverts to old state
+            
+            Cost: 2 weeks debugging, 10,000 ECU recall
+            
+            Fix: Critical section protection
+            ```c
+            // WRONG:
+            uint8 data = mailbox[5];
+            data |= 0x01;
+            mailbox[5] = data;  // Race here!
+            
+            // CORRECT:
+            SuspendAllInterrupts();
+            uint8 data = mailbox[5];
+            data |= 0x01;
+            mailbox[5] = data;
+            ResumeAllInterrupts();
+            ```
+            ```
+            
+            **Race #3: TX Confirmation Race**
+            ```
+            Scenario: TX confirm interrupt vs. new TX request
+            
+            Thread A (App Task):
+            T0: Can_Write(Mailbox_0, Data_A)
+            T1: HW starts transmission
+            T2: **App task calls Can_Write() again**
+            T3: Check: Is Mailbox_0 free?
+                Reading: CAN_TXBRP register
+            
+            Thread B (CAN TX ISR):
+            T3.5: TX complete interrupt fires
+            T3.6: Clear TXBRP bit for Mailbox_0
+            
+            Thread A (continues):
+            T4: Reads TXBRP = 0 (free)
+            T5: Writes new data to Mailbox_0
+            
+            **BUT: ISR at T3.6 is processing old confirmation!**
+            
+            Result:
+            - CanIf_TxConfirmation() called with wrong PDU ID
+            - COM state machine confusion
+            - App thinks old message failed
+            
+            Production Bug Example:
+            ------------------------
+            ECU: Transmission Control Module (TCM)
+            Symptom: Gear shift command not acknowledged
+            
+            Timeline:
+            - App sends Gear=3
+            - Immediately sends Gear=4 (driver changed mind)
+            - TX confirm for Gear=3 arrives AFTER Gear=4 sent
+            - CanIf thinks Gear=4 confirmed
+            - COM marks Gear=3 as failed → DTC logged
+            
+            Fix: Proper mailbox state tracking
+            ```c
+            typedef enum {
+                MAILBOX_FREE,
+                MAILBOX_TX_PENDING,
+                MAILBOX_TX_IN_PROGRESS
+            } MailboxState_t;
+            
+            MailboxState_t mailbox_state[NUM_MAILBOXES];
+            
+            Can_Write() {
+                if (mailbox_state[idx] != MAILBOX_FREE) {
+                    return E_NOT_OK;  // Prevent race
+                }
+                
+                SchM_Enter_Can_EXCLUSIVE_AREA_0();
+                mailbox_state[idx] = MAILBOX_TX_PENDING;
+                // Write to HW
+                SchM_Exit_Can_EXCLUSIVE_AREA_0();
+            }
+            
+            Can_TxConfirm_ISR() {
+                SchM_Enter_Can_EXCLUSIVE_AREA_0();
+                if (mailbox_state[idx] == MAILBOX_TX_IN_PROGRESS) {
+                    mailbox_state[idx] = MAILBOX_FREE;
+                    // Notify upper layer
+                }
+                SchM_Exit_Can_EXCLUSIVE_AREA_0();
+            }
+            ```
+            ```
+            
+            **Race #4: Bus-Off Recovery Race**
+            ```
+            Scenario: Multiple threads trying to restart CAN
+            
+            Event: CAN controller enters BUS-OFF (error counter > 255)
+            
+            Thread A (Error Monitor Task):
+            T0: Detect BUS-OFF condition
+            T1: Call Can_SetControllerMode(STOP)
+            T2: Wait 1 second (recovery time)
+            T3: Call Can_SetControllerMode(START)
+            
+            Thread B (Diagnostic Task):
+            T1.5: Also detects BUS-OFF (reading same register)
+            T2.5: Call Can_SetControllerMode(STOP) - redundant!
+            T3.5: Call Can_SetControllerMode(START)
+            
+            Result:
+            - Controller restarted TWICE
+            - Second START while already running
+            - Hardware state machine confusion
+            - Possible: All TX mailboxes lost
+            
+            Real Production Issue:
+            ----------------------
+            ECU: Gateway ECU (3 CAN channels)
+            Symptom: After bus-off, some messages never sent again
+            
+            Root Cause:
+            - Two tasks restart same controller
+            - Second restart clears TX pending bits
+            - Messages queued before restart: lost forever
+            
+            Financial Impact:
+            - 50,000 ECUs in field
+            - Remote software update required
+            - Cost: $2M (update + validation + deployment)
+            
+            Fix: State machine with mutex
+            ```c
+            typedef enum {
+                CAN_STATE_UNINIT,
+                CAN_STATE_STOPPED,
+                CAN_STATE_STARTED,
+                CAN_STATE_BUSOFF,
+                CAN_STATE_RECOVERY
+            } Can_StateType;
+            
+            Can_StateType can_state[NUM_CONTROLLERS];
+            osMutexId can_mutex[NUM_CONTROLLERS];
+            
+            Can_SetControllerMode(...) {
+                osMutexWait(can_mutex[Controller], osWaitForever);
+                
+                switch (can_state[Controller]) {
+                    case CAN_STATE_BUSOFF:
+                        if (Mode == CAN_T_START) {
+                            can_state[Controller] = CAN_STATE_RECOVERY;
+                            // Perform recovery
+                            can_state[Controller] = CAN_STATE_STARTED;
+                        }
+                        break;
+                    // ...
+                }
+                
+                osMutexRelease(can_mutex[Controller]);
+            }
+            ```
+            ```
+            
+            **Race #5: Timestamp Wraparound**
+            ```
+            Scenario: 32-bit timestamp counter overflows
+            
+            CAN controller provides timestamp per message:
+            - 32-bit counter @ 40 MHz
+            - Wraparound time: 107 seconds
+            
+            T0: Frame A received, timestamp = 0xFFFFFFF0
+            T1: Frame B received, timestamp = 0x00000010 (wrapped!)
+            
+            Software calculates delta:
+            delta = TS_B - TS_A
+            delta = 0x00000010 - 0xFFFFFFF0
+            delta = 0x00000020 (32 microseconds) ✓ Correct
+            
+            But signed math:
+            delta_signed = (int32_t)(TS_B - TS_A)
+            delta_signed = (int32_t)(0x00000020)
+            delta_signed = 32 ✓
+            
+            **HOWEVER:**
+            If using:
+            if (TS_B > TS_A) {  // WRONG!
+                delta = TS_B - TS_A;
+            }
+            → FALSE after wraparound!
+            → Delta calculation fails
+            
+            Production Bug:
+            ---------------
+            ECU: ADAS Camera Module
+            Symptom: Sporadic "message too old" errors
+            
+            Root Cause:
+            - Timeout check used: (now - timestamp) > TIMEOUT
+            - After wraparound: now=0x10, timestamp=0xFFFFFFF0
+            - Calculation: 0x10 - 0xFFFFFFF0 = huge negative
+            - Interpreted as: message is from the future!
+            - Message rejected as invalid
+            
+            Fix: Use modulo arithmetic
+            ```c
+            // CORRECT:
+            uint32 delta = (TS_B - TS_A);  // Unsigned wraparound OK
+            
+            if (delta < MAX_TIMEOUT) {
+                // Message is recent
+            }
+            
+            // Also works for wraparound:
+            // TS_A = 0xFFFFFFF0
+            // TS_B = 0x00000010
+            // delta = 0x00000010 - 0xFFFFFFF0
+            //       = 0x00000020 (unsigned wraparound)
+            //       = 32 ticks ✓
+            ```
+            ```
+        end note
+    }
+    
+    rectangle "Memory Barriers & Cache Coherency" as MemoryBarriers #FFC107 {
+        note right
+            **CRITICAL: ARM Cortex Memory Model**
+            
+            **Problem: Weakly-Ordered Memory Access**
+            ```
+            ARM Cortex-M/R/A processors:
+            - Out-of-order execution
+            - Write buffering
+            - Instruction pipelining
+            
+            Consequences:
+            - Memory writes may be reordered
+            - Reads can overtake writes
+            - Cache inconsistency
+            
+            Example:
+            ```c
+            mailbox[0] = 0x12345678;  // Write A
+            mailbox[1] = 0x9ABCDEF0;  // Write B
+            CAN->TXBAR = 0x01;        // Write C (trigger TX)
+            
+            Compiler/CPU may reorder:
+            Write C executed BEFORE Write A/B!
+            → Hardware transmits OLD data from mailbox
+            → WRONG DATA ON CAN BUS
+            ```
+            ```
+            
+            **Memory Barrier Types:**
+            ```c
+            // 1. Compiler Barrier (prevents compiler reorder)
+            #define COMPILER_BARRIER() __asm__ volatile("" ::: "memory")
+            
+            // 2. Data Memory Barrier (DMB)
+            // Ensures all memory accesses before complete before after
+            #define DATA_MEMORY_BARRIER() __asm__ volatile("dmb" ::: "memory")
+            
+            // 3. Data Synchronization Barrier (DSB)
+            // Ensures all memory + instructions complete
+            #define DATA_SYNC_BARRIER() __asm__ volatile("dsb" ::: "memory")
+            
+            // 4. Instruction Synchronization Barrier (ISB)
+            // Flushes pipeline
+            #define INSTR_SYNC_BARRIER() __asm__ volatile("isb" ::: "memory")
+            ```
+            
+            **Correct CAN Write Implementation:**
+            ```c
+            Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                     const Can_PduType* PduInfo) {
+                
+                uint32* mailbox = &CAN_MSG_RAM[Hth * 4];
+                
+                // Step 1: Write CAN ID
+                mailbox[0] = PduInfo->id;
+                
+                // Step 2: Write DLC
+                mailbox[1] = (PduInfo->length & 0x0F);
+                
+                // Step 3: Write data
+                uint32* data = (uint32*)PduInfo->sdu;
+                mailbox[2] = data[0];
+                mailbox[3] = data[1];
+                
+                // **CRITICAL: Memory barrier before trigger**
+                DATA_SYNC_BARRIER();
+                
+                // Step 4: Trigger transmission
+                CAN->TXBAR = (1U << Hth);
+                
+                // DSB ensures all writes complete before TX starts
+                // Without DSB: Race between mailbox write and HW read
+                
+                return E_OK;
+            }
+            ```
+            
+            **Cache Coherency Issues:**
+            ```
+            ARM Cortex-A with Data Cache:
+            
+            Scenario: DMA + Cache enabled
+            
+            CPU writes to mailbox (cached):
+            mailbox[0] = 0x12345678;  // Stored in cache only!
+            
+            CAN controller reads via DMA:
+            - DMA bypasses cache
+            - Reads old value from RAM
+            - Transmits WRONG data
+            
+            Solution: Cache maintenance
+            ```c
+            // Before HW read (DMA TX):
+            SCB_CleanDCache_by_Addr(mailbox, size);
+            DATA_SYNC_BARRIER();
+            CAN->TXBAR = (1U << Hth);
+            
+            // After HW write (DMA RX):
+            DATA_SYNC_BARRIER();
+            SCB_InvalidateDCache_by_Addr(mailbox, size);
+            uint32 data = mailbox[0];  // Read from RAM
+            ```
+            
+            Production Bug Example:
+            -----------------------
+            Platform: ARM Cortex-A53 (Linux + AUTOSAR)
+            ECU: Infotainment Head Unit
+            
+            Symptom: 
+            - CAN messages have corrupted data
+            - Happens intermittently
+            - Only on high-end ECU variant (has cache)
+            
+            Root Cause:
+            - BSW compiled without cache maintenance
+            - Assumption: Memory mapped I/O is uncached
+            - Reality: Message RAM in cached region
+            
+            Timeline:
+            - 6 months after production start
+            - Customer complaints: "radio volume changes randomly"
+            - 3 weeks to isolate (cache-related very hard to debug)
+            - Required: BSW patch + ECU recall for critical vehicles
+            
+            Cost: $5M (investigation + fix + deployment)
+            
+            Fix: 
+            1. Move Message RAM to uncached region (MPU config)
+            2. Add explicit cache operations
+            3. Compile with -fno-strict-aliasing
+            ```
+            ```
+        end note
+    }
+}
+
+' ============ PRODUCTION BUG DATABASE ============
+package "Real Production Bugs & ECU Resets" as ProductionBugs #FFCDD2 {
+    
+    rectangle "Bug #1: Watchdog Reset Loop" as Bug1 #EF9A9A {
+        note right
+            **Description:**
+            ECU resets every 2-3 seconds in vehicle
+            
+            **Symptoms:**
+            - Instrument cluster flickers
+            - Climate control resets to default
+            - Error code: P0601 (ECU reset)
+            
+            **Root Cause Analysis (Assembly Level):**
+            ```
+            Disassembly of Can_MainFunction_Write():
+            
+            0x08001000: PUSH {R4-R11, LR}
+            0x08001004: MOV R4, #0          ; mailbox_idx = 0
+            0x08001008: LDR R5, =num_mailboxes
+            
+            LOOP:
+            0x0800100C: CMP R4, R5
+            0x08001010: BGE END_LOOP
+            
+            0x08001014: LDR R0, =mailbox_state
+            0x08001018: LDR R1, [R0, R4, LSL #2]
+            0x0800101C: CMP R1, #PENDING
+            0x08001020: BNE NEXT_MAILBOX
+            
+            ; **BUG HERE:**
+            0x08001024: BL Can_WriteSingleFrame  ; Takes 200 µs!
+            
+            0x08001028: ADD R4, R4, #1
+            0x0800102C: B LOOP
+            
+            END_LOOP:
+            0x08001030: POP {R4-R11, PC}
+            
+            **Problem:**
+            - Main function has 64 mailboxes configured
+            - Each Can_WriteSingleFrame() takes 200 µs
+            - Total loop time: 64 × 200 µs = 12.8 ms
+            
+            - Watchdog timeout: 10 ms
+            - Function exceeds watchdog window!
+            - Watchdog triggers reset
+            
+            **Why Not Caught in Testing?**
+            - Test bench: Only 10 mailboxes active
+            - 10 × 200 µs = 2 ms < 10 ms → OK
+            - Production: All 64 mailboxes used
+            - 64 × 200 µs = 12.8 ms > 10 ms → RESET
+            
+            **Fix:**
+            ```c
+            // Add watchdog kick in loop
+            for (i = 0; i < num_mailboxes; i++) {
+                if (i % 16 == 0) {
+                    Wdg_Trigger();  // Kick every 16 iterations
+                }
+                Can_WriteSingleFrame(i);
+            }
+            
+            // OR: Optimize Can_WriteSingleFrame()
+            // Reduce from 200 µs to 50 µs
+            // Total: 64 × 50 µs = 3.2 ms < 10 ms
+            ```
+            
+            **Cost Impact:**
+            - 20,000 vehicles affected
+            - Software update via dealer (no OTA capability)
+            - Customer compensation: $100/vehicle
+            - Total: $2M + reputation damage
+            ```
+        end note
+    }
+    
+    rectangle "Bug #2: Stack Overflow in ISR" as Bug2 #E57373 {
+        note right
+            **Description:**
+            Random ECU resets during high CAN traffic
+            
+            **Symptoms:**
+            - Happens during calibration (XCP traffic)
+            - Memory corruption detected
+            - HardFault exception
+            
+            **Root Cause Analysis:**
+            ```
+            Stack Dump After Crash:
+            
+            SP = 0x20007FF0 (near end of stack region)
+            Stack region: 0x20006000 - 0x20008000 (8 KB)
+            
+            Stack trace:
+            0x20007FF0: [LR] = 0x08005678 (CanIf_RxIndication)
+            0x20007FE0: [LR] = 0x0800ABCD (PduR_CanIfRxIndication)
+            0x20007FC0: [LR] = 0x08012345 (Com_RxIndication)
+            0x20007F80: [LR] = 0x08015678 (Com_UnpackSignal)
+            0x20007F00: [LR] = 0x08018ABC (memcpy)
+            ...
+            0x20006100: Stack guard pattern corrupted!
+            
+            **Problem:**
+            ISR call chain too deep:
+            
+            Can_RxISR()                     Stack: 64 bytes
+            → CanIf_RxIndication()          Stack: 128 bytes
+              → PduR_CanIfRxIndication()    Stack: 96 bytes
+                → Com_RxIndication()        Stack: 256 bytes (large frame buffer)
+                  → Com_UnpackSignal()      Stack: 512 bytes (signal buffer)
+                    → memcpy()              Stack: 32 bytes
+            
+            Total: 1088 bytes
+            
+            During high traffic:
+            - 10 frames buffered in FIFO
+            - ISR processes all in one call
+            - Stack usage: 1088 × 10 = 10,880 bytes!
+            
+            Stack size: Only 8 KB
+            → Overflow into adjacent memory
+            → Corruption of global variables
+            → HardFault
+            ```
+            
+            **Assembly Analysis:**
+            ```
+            Com_RxIndication:
+            0x08012340: PUSH {R4-R11, LR}    ; 9 regs × 4 bytes = 36 bytes
+            0x08012344: SUB SP, SP, #512     ; Local buffer = 512 bytes
+            0x08012348: MOV R4, R0           ; Copy params
+            0x0801234C: MOV R5, R1
+            
+            ; **STACK USAGE: 36 + 512 = 548 bytes**
+            ; Multiple nested calls → exceeds limit
+            
+            ; No stack overflow check!
+            ; No canary pattern!
+            ```
+            
+            **Fix:**
+            ```c
+            // Option 1: Reduce stack usage
+            // Move large buffers to global (static)
+            static uint8 signal_buffer[512];  // Not on stack
+            
+            // Option 2: Increase stack size
+            #define CAN_ISR_STACK_SIZE (16 * 1024)  // 16 KB
+            
+            // Option 3: Deferred processing
+            // Copy data to queue in ISR, process in task
+            void Can_RxISR(void) {
+                // Minimal processing
+                uint32 can_id = mailbox[0];
+                uint32 data[2] = {mailbox[2], mailbox[3]};
+                
+                // Enqueue for later processing
+                os_queue_send(can_rx_queue, &rx_frame);
+                
+                // ISR exits quickly
+            }
+            
+            void Can_ProcessTask(void) {
+                while (1) {
+                    os_queue_receive(can_rx_queue, &rx_frame);
+                    CanIf_RxIndication(...);  // Process in task context
+                }
+            }
+            
+            // Option 4: Enable stack overflow detection
+            #define configCHECK_FOR_STACK_OVERFLOW 2
+            
+            void vApplicationStackOverflowHook(TaskHandle_t xTask, 
+                                               char *pcTaskName) {
+                // Log error
+                DET_ReportError(CAN_MODULE_ID, 0, 
+                               CAN_E_STACK_OVERFLOW);
+                // Safe shutdown
+                EcuM_ShutdownOS(EcuM_GetShutdownCause());
+            }
+            ```
+            
+            **Production Impact:**
+            - 5,000 ECUs in field
+            - Affects only specific usage pattern (XCP calibration)
+            - Not caught in normal testing
+            - Discovered during customer calibration event
+            
+            **Cost:**
+            - Emergency software hotfix
+            - On-site update for all affected vehicles
+            - $500K (engineering + deployment)
+            ```
+        end note
+    }
+    
+        rectangle "Bug #3: Interrupt Priority Inversion" as Bug3 #E53935 {
+            note right
+                **Description:**
+                Critical safety function misses deadline
+                
+                **Symptoms:**
+                - ABS warning light flickers
+                - Brake assist delay (50-100 ms)
+                - Happens during heavy infotainment usage
+                
+                **Root Cause Analysis:**
+                ```
+                NVIC Priority Configuration:
+                
+                IRQ 22 (CAN0 RX):     Priority 2
+                IRQ 23 (CAN1 RX):     Priority 2
+                IRQ 45 (UART Debug):  Priority 3
+                IRQ 67 (Timer):       Priority 1 (Safety - Brake Assist)
+                IRQ 89 (ADC):         Priority 4
+                
+                **Problem: Priority Inversion**
+                
+                Timeline:
+                T0:    ADC ISR starts (Priority 4, lowest)
+                T+10:  CAN0 RX frame arrives
+                       → CAN0 ISR preempts ADC (Priority 2 > 4)
+                T+20:  CAN0 ISR calls CanIf_RxIndication()
+                T+30:  CanIf acquires mutex (can_if_mutex)
+                T+40:  Timer ISR fires (Priority 1, highest - BRAKE!)
+                       → Timer ISR preempts CAN0 ISR
+                T+50:  Timer ISR tries to send CAN frame
+                       → Calls CanIf_Transmit()
+                       → Tries to acquire can_if_mutex
+                       → **BLOCKED! Mutex held by lower priority CAN0 ISR**
+                T+60:  Timer ISR spins waiting for mutex
+                T+500: CAN0 ISR finally releases mutex
+                T+510: Timer ISR acquires mutex
+                T+520: Timer ISR completes
+                
+                **Result:**
+                - High-priority Timer ISR delayed 460 µs
+                - Timer ISR controls brake assist
+                - Brake assist deadline: 10 ms
+                - Single instance OK, but accumulated delays → miss deadline
+                
+                **Why Happened:**
+                - Mutex not priority-inheritance enabled
+                - Low-priority ISR blocks high-priority ISR
+                - Classic priority inversion problem (Mars Pathfinder scenario!)
+                ```
+                
+                **Assembly Evidence:**
+                ```
+                Timer ISR disassembly:
+                
+                0x08020000: PUSH {R4, LR}
+                0x08020004: BL CanIf_Transmit       ; Call CanIf
+                
+                CanIf_Transmit:
+                0x08015000: PUSH {R4, LR}
+                0x08015004: LDR R0, =can_if_mutex
+                0x08015008: BL osMutexWait          ; Try acquire
+                
+                osMutexWait:
+                0x0800C000: LDR R1, [R0]            ; Check mutex owner
+                0x0800C004: CMP R1, #0
+                0x0800C008: BNE MUTEX_BLOCKED       ; Already owned
+                
+                MUTEX_BLOCKED:
+                0x0800C00C: WFI                     ; Wait for interrupt
+                0x0800C010: B osMutexWait           ; Retry (spin loop!)
+                
+                ; **SPINS UNTIL MUTEX RELEASED**
+                ; High-priority ISR blocked by low-priority ISR!
+                
+                **Detailed Execution Trace:**
+                
+                0x08020004: BL CanIf_Transmit
+                - Stack push: 8 bytes
+                - Branch to 0x08015000
+                
+                0x08015008: BL osMutexWait
+                - R0 = &can_if_mutex (0x20001234)
+                - Branch to 0x0800C000
+                
+                0x0800C000: LDR R1, [R0]
+                - Read mutex state from 0x20001234
+                - Value = 0x00000002 (owned by Task ID 2 - CAN0 ISR)
+                
+                0x0800C004: CMP R1, #0
+                - CPSR.Z = 0 (not zero)
+                
+                0x0800C008: BNE MUTEX_BLOCKED
+                - Branch taken to 0x0800C00C
+                
+                0x0800C00C: WFI (Wait For Interrupt)
+                - CPU enters low-power mode
+                - Waiting for ANY interrupt to wake
+                
+                **THE PROBLEM:**
+                When CAN0 ISR (Priority 2) releases mutex:
+                - Interrupt generated (mutex available)
+                - But CAN0 ISR continues executing (Priority 2)
+                - Timer ISR (Priority 1) is STILL preempting CAN0
+                - WFI wakes up, sees mutex still locked
+                - Loops back, WFI again!
+                
+                **Cycle repeats until CAN0 ISR completely done**
+                ```
+                
+                **Microscopic Timing Analysis:**
+                ```
+                Detailed Timeline (nanosecond resolution):
+                
+                T=0 ns:      ADC ISR executing (Priority 4)
+                T=1000 ns:   CAN0 frame arrives, interrupt pending
+                T=1200 ns:   NVIC processes CAN0 interrupt
+                T=1400 ns:   Context switch to CAN0 ISR
+                T=1600 ns:   CAN0 ISR: PUSH registers (20 ns)
+                T=1620 ns:   CAN0 ISR: Read mailbox (50 ns)
+                T=1670 ns:   CAN0 ISR: Call CanIf_RxIndication
+                
+                T=2000 ns:   CanIf_RxIndication executing
+                T=2100 ns:   osMutexWait(can_if_mutex)
+                T=2150 ns:   Mutex acquired (set owner = CAN0 ISR)
+                T=2200 ns:   CanIf processing frame data
+                
+                T=5000 ns:   Timer ISR fires (Priority 1, BRAKE CRITICAL)
+                T=5200 ns:   NVIC preempts CAN0 ISR
+                T=5400 ns:   Context switch to Timer ISR
+                T=5600 ns:   Timer ISR: PUSH registers (20 ns)
+                T=5620 ns:   Timer ISR: Read brake sensor ADC
+                T=5800 ns:   Timer ISR: Calculate brake assist
+                T=6000 ns:   Timer ISR: Call CanIf_Transmit
+                
+                T=6200 ns:   CanIf_Transmit: osMutexWait(can_if_mutex)
+                T=6250 ns:   Read mutex state: LOCKED by CAN0 ISR
+                T=6300 ns:   **BLOCKED!** Enter WFI
+                
+                T=6400 ns:   CPU idle (waiting for mutex)
+                T=7000 ns:   (still waiting...)
+                T=10000 ns:  (still waiting...)
+                T=50000 ns:  (still waiting...)
+                
+                **Meanwhile, CAN0 ISR context is saved on stack!**
+                It CANNOT continue until Timer ISR yields CPU.
+                But Timer ISR CANNOT yield until it gets mutex.
+                But mutex is held by CAN0 ISR context.
+                
+                **DEADLOCK-like condition! (Priority Inversion)**
+                
+                T=500000 ns: Some OTHER interrupt wakes CPU
+                T=500100 ns: WFI returns, checks mutex again
+                T=500150 ns: Mutex STILL locked
+                T=500200 ns: WFI again
+                
+                **Finally, Timer ISR timeout (watchdog-like):**
+                T=1000000 ns: Timer ISR watchdog expires
+                T=1000100 ns: Timer ISR gives up, returns E_NOT_OK
+                T=1000200 ns: Brake assist FAILED to send command
+                T=1000300 ns: Brake assist deadline MISSED
+                T=1000400 ns: DEM logs: BRAKE_ASSIST_TIMEOUT
+                T=1000500 ns: Warning light illuminates
+                
+                T=1200000 ns: CAN0 ISR finally completes
+                T=1200100 ns: Mutex released
+                T=1200200 ns: Next Timer ISR succeeds (too late!)
+                ```
+                
+                **Fix Options (All Levels):**
+                ```c
+                // Fix #1: Priority Inheritance Mutex (OS Level)
+                osMutexDef_t can_if_mutex_def = {
+                    .attr_bits = osMutexPrioInherit,  // Enable priority inheritance
+                    .name = "CanIfMutex"
+                };
+                
+                osMutexId can_if_mutex = osMutexCreate(&can_if_mutex_def);
+                
+                // How it works:
+                // When CAN0 ISR (Priority 2) holds mutex:
+                // And Timer ISR (Priority 1) requests it:
+                // → OS temporarily elevates CAN0 ISR to Priority 1
+                // → CAN0 ISR completes faster
+                // → Releases mutex
+                // → Priority restored to 2
+                // → Timer ISR acquires mutex immediately
+                
+                // Fix #2: Separate Mailboxes (Architectural)
+                // Timer ISR uses dedicated TX mailbox (no shared resource)
+                CanIf_Config {
+                    .TxPdu[0] = {
+                        .CanId = 0x123,
+                        .HthRef = HTH_TIMER_DEDICATED,  // Exclusive mailbox
+                        .Mutex = NULL  // No mutex needed!
+                    }
+                }
+                
+                // Fix #3: Disable Interrupts (Brute Force)
+                CanIf_Transmit() {
+                    uint32 primask = __get_PRIMASK();
+                    __disable_irq();  // Disable ALL interrupts
+                    
+                    // Critical section
+                    if (mailbox_free) {
+                        write_mailbox();
+                        trigger_tx();
+                    }
+                    
+                    __set_PRIMASK(primask);  // Restore interrupts
+                    
+                    // Pro: Guaranteed no preemption
+                    // Con: Affects ALL interrupt latency
+                }
+                
+                // Fix #4: Lock-Free Algorithm (Advanced)
+                // Use atomic compare-and-swap (CAS)
+                typedef struct {
+                    uint32 can_id;
+                    uint8 data[8];
+                    uint8 dlc;
+                    volatile uint32 state;  // 0=free, 1=pending, 2=transmitting
+                } Mailbox_t;
+                
+                Mailbox_t mailbox[NUM_MAILBOXES];
+                
+                Std_ReturnType CanIf_Transmit_LockFree(uint8 mailbox_idx, 
+                                                       const PduInfoType* pdu) {
+                    Mailbox_t* mb = &mailbox[mailbox_idx];
+                    
+                    // Atomic compare-and-swap
+                    uint32 expected = 0;  // Free
+                    uint32 desired = 1;   // Pending
+                    
+                    // ARM Cortex-M: LDREX/STREX instructions
+                    uint32 old_state;
+                    do {
+                        old_state = __LDREXW(&mb->state);
+                        if (old_state != expected) {
+                            __CLREX();
+                            return E_NOT_OK;  // Mailbox busy
+                        }
+                    } while (__STREXW(desired, &mb->state) != 0);
+                    
+                    // Successfully claimed mailbox atomically
+                    // No mutex needed, no priority inversion possible
+                    
+                    // Write data
+                    mb->can_id = pdu->id;
+                    mb->dlc = pdu->length;
+                    memcpy(mb->data, pdu->sdu, pdu->length);
+                    
+                    // Memory barrier
+                    __DMB();
+                    
+                    // Trigger transmission
+                    CAN->TXBAR |= (1 << mailbox_idx);
+                    
+                    // Update state
+                    __STREXW(2, &mb->state);  // Transmitting
+                    
+                    return E_OK;
+                }
+                
+                // Fix #5: Deadline Monitoring (Detection)
+                void Timer_ISR_with_Monitoring(void) {
+                    uint32 start_time = RTC_GetTimestamp_us();
+                    
+                    Std_ReturnType ret = CanIf_Transmit(...);
+                    
+                    uint32 end_time = RTC_GetTimestamp_us();
+                    uint32 duration = end_time - start_time;
+                    
+                    if (duration > DEADLINE_US) {
+                        // Deadline missed!
+                        DEM_ReportError(DEM_E_BRAKE_ASSIST_DEADLINE);
+                        
+                        // Log for post-mortem analysis
+                        trace_buffer[trace_idx].function = TIMER_ISR;
+                        trace_buffer[trace_idx].duration = duration;
+                        trace_buffer[trace_idx].timestamp = start_time;
+                        trace_idx++;
+                        
+                        // Attempt fallback mechanism
+                        Brake_Assist_Fallback();
+                    }
+                }
+                ```
+                
+                **Production Impact:**
+                - Safety-critical issue (braking system)
+                - Required immediate recall notification (NHTSA filing)
+                - 100,000 vehicles affected (2023 model year)
+                - Regulatory investigation opened
+                
+                **Timeline:**
+                - Week 1: Customer reports ABS warning during navigation use
+                - Week 2: 50 similar reports, escalated to engineering
+                - Week 3: Cannot reproduce in test lab (different usage pattern)
+                - Week 4: Field data logger installed in customer vehicles
+                - Week 5: Captured priority inversion trace (logic analyzer)
+                - Week 6: Root cause identified (mutex + priority)
+                - Week 7: Fix developed and validated
+                - Week 8: OTA update rolled out (90% of fleet)
+                - Week 9: Dealer update for remaining 10%
+                
+                **Cost Breakdown:**
+                - Software fix development: $1M (6 weeks × 10 engineers)
+                - Field investigation: $500K (loggers, travel, analysis)
+                - OTA deployment: $1M (infrastructure + monitoring)
+                - Dealer updates: $50/vehicle × 10K = $500K
+                - Regulatory fines (priority violation): $2M
+                - Customer compensation (inconvenience): $100 × 5K complaints = $500K
+                - Brand reputation damage: Incalculable
+                - **Total: $5.5M direct costs**
+                
+                **Lesson Learned:**
+                - ALWAYS use priority inheritance for shared resources
+                - NEVER call blocking operations from high-priority ISRs
+                - Model and analyze worst-case execution time (WCET)
+                - Use static analysis tools (UPPAAL, Spin) for deadlock detection
+                - Field monitoring CRITICAL for timing-dependent bugs
+                ```
+            end note
+        }
+        
+        rectangle "Bug #4: DMA + Cache Incoherency" as Bug4 #C62828 {
+            note right
+                **Description:**
+                CAN frames transmitted with random garbage data
+                
+                **Symptoms:**
+                - 1 in 1000 frames has corrupted bytes
+                - Only on high-performance ECU variant (Cortex-A)
+                - Cannot reproduce on test bench (Cortex-M variant)
+                - Corruption appears random: different bytes each time
+                
+                **Root Cause Analysis:**
+                ```
+                Platform: ARM Cortex-A53 @ 1.2 GHz (Premium Infotainment ECU)
+                Cache: 32 KB L1 Data Cache (write-back, 8-way set associative)
+                CAN Controller: M_CAN (Bosch) with DMA for message RAM access
+                
+                **Memory Map:**
+                0x00000000 - 0x0FFFFFFF: ROM (cached)
+                0x40000000 - 0x4FFFFFFF: Peripheral space (uncached, device memory)
+                0x80000000 - 0x8FFFFFFF: RAM (cached, write-back, normal memory)
+                0xC0000000 - 0xCFFFFFFF: RAM (uncached, normal memory)
+                
+                **Configuration Error (Linker Script):**
+                ```ld
+                MEMORY {
+                    FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 2M
+                    RAM (rwx)   : ORIGIN = 0x80000000, LENGTH = 512K  /* CACHED! */
+                    PERIPHERAL  : ORIGIN = 0x40000000, LENGTH = 256M
+                }
+                
+                SECTIONS {
+                    .text : { *(.text) } > FLASH
+                    .data : { *(.data) } > RAM
+                    .bss  : { *(.bss)  } > RAM
+                    
+                    /* BUG: CAN Message RAM in cached region! */
+                    .can_msg_ram : {
+                        . = ALIGN(64);
+                        CAN_MSG_RAM_BASE = .;
+                        . += 0x4000;  /* 16 KB */
+                    } > RAM  /* SHOULD BE: > PERIPHERAL or uncached RAM */
+                }
+                ```
+                
+                **What Happens (Silicon Level):**
+                
+                Step 1: CPU writes frame data
+                ```c
+                uint32* mailbox = (uint32*)0x80010000;  // Cached address!
+                mailbox[0] = 0x12345678;  // CAN ID
+                mailbox[1] = 0x00000008;  // DLC=8
+                mailbox[2] = 0xDEADBEEF;  // Data bytes 0-3
+                mailbox[3] = 0xCAFEBABE;  // Data bytes 4-7
+                
+                // **Data stays in CPU cache (write-back policy)**
+                // Not yet written to main RAM!
+                ```
+                
+                Step 2: Cache Line State (Silicon Perspective)
+                ```
+                L1 Data Cache (32 KB, 8-way set associative):
+                
+                Cache Line Address: 0x80010000
+                Cache Set Index: (0x80010000 >> 6) & 0x3F = 0x00
+                Cache Tag: 0x80010000 >> 11 = 0x10008
+                
+                Cache Line Entry:
+                ┌─────────────────────────────────────┐
+                │ Valid: 1                            │
+                │ Dirty: 1  ← Modified, not written  │
+                │ Tag: 0x10008                        │
+                │ Way: 3                              │
+                ├─────────────────────────────────────┤
+                │ Data[0]:  0x12345678                │
+                │ Data[1]:  0x00000008                │
+                │ Data[2]:  0xDEADBEEF                │
+                │ Data[3]:  0xCAFEBABE                │
+                │ Data[4-15]: (other mailbox data)    │
+                └─────────────────────────────────────┘
+                
+                Main RAM at 0x80010000:
+                ┌─────────────────────────────────────┐
+                │ [0x00]: 0x00000000  ← OLD VALUE!    │
+                │ [0x04]: 0x00000000  ← OLD VALUE!    │
+                │ [0x08]: 0x00000000  ← OLD VALUE!    │
+                │ [0x0C]: 0x00000000  ← OLD VALUE!    │
+                └─────────────────────────────────────┘
+                ```
+                
+                Step 3: Trigger DMA
+                ```c
+                // Trigger CAN transmission
+                CAN->TXBAR = (1U << 0);
+                
+                // Hardware DMA controller reads mailbox
+                // DMA is NOT cache-coherent!
+                // DMA reads from MAIN RAM, bypassing cache
+                ```
+                
+                Step 4: DMA Read (Silicon Level)
+                ```
+                DMA Controller FSM:
+                
+                State 1: IDLE
+                → TXBAR write detected
+                → Transition to READ_MAILBOX
+                
+                State 2: READ_MAILBOX
+                → AXI bus request to 0x80010000
+                → Bus arbiter grants access
+                → DMA reads 16 bytes from RAM
+                
+                **CRITICAL: DMA reads from MAIN RAM**
+                DMA Result:
+                - Read[0]: 0x00000000  (OLD VALUE!)
+                - Read[1]: 0x00000000  (OLD VALUE!)
+                - Read[2]: 0x00000000  (OLD VALUE!)
+                - Read[3]: 0x00000000  (OLD VALUE!)
+                
+                State 3: TRANSMIT
+                → CAN controller transmits frame
+                → Data: 00 00 00 00 00 00 00 00 (GARBAGE!)
+                → CRC calculated on wrong data
+                → Frame transmitted with WRONG DATA
+                
+                **MEANWHILE:**
+                CPU cache still has correct data (0xDEADBEEF, etc.)
+                Software thinks data is correct
+                But hardware transmitted zeros!
+                ```
+                
+                Step 5: Cache Eviction (Too Late)
+                ```
+                Later (unpredictable timing):
+                - Cache line gets evicted (capacity miss, conflict miss)
+                - Write-back occurs
+                - Main RAM updated: 0xDEADBEEF
+                
+                **But frame already transmitted with wrong data!**
+                
+                Eviction Triggers (any of these):
+                1. Cache line full (all 8 ways occupied)
+                2. Another address maps to same cache set
+                3. Explicit cache maintenance instruction
+                4. Cache controller LRU policy evicts line
+                
+                Timing: 100 ns to 10 ms (completely unpredictable)
+                ```
+                
+                **Why Intermittent? (Probabilistic Analysis)**
+                ```
+                Probability of corruption depends on:
+                
+                Factor 1: Write-back timing
+                - If cache evicts BEFORE DMA read: OK (lucky!)
+                - If DMA reads BEFORE cache evicts: BUG!
+                
+                Factor 2: Cache pressure
+                - Low cache activity: Longer time before eviction → Higher bug rate
+                - High cache activity: Faster eviction → Lower bug rate (ironic!)
+                
+                Factor 3: CPU frequency vs. DMA speed
+                - CPU @ 1.2 GHz: Cache write ~1 ns
+                - DMA @ 100 MHz: RAM read ~10 ns
+                - Race window: 9 ns (DMA can win!)
+                
+                **Measured Bug Rate:**
+                - Test bench (low traffic): 1 in 10,000 frames corrupt
+                - Production (high traffic): 1 in 1,000 frames corrupt
+                - Stress test (cache thrashing): 1 in 100 frames corrupt
+                
+                **Why higher traffic = higher bug rate?**
+                → More cache pressure → More cache evictions → More races
+                ```
+                
+                **Assembly-Level Evidence:**
+                ```
+                Can_Write disassembly:
+                
+                0x08010000: PUSH {R4-R6, LR}
+                0x08010004: LDR R4, =CAN_MSG_RAM_BASE  ; 0x80010000 (CACHED!)
+                0x08010008: MOV R5, R0                 ; Mailbox index
+                0x0801000C: ADD R4, R4, R5, LSL #4     ; mailbox addr
+                
+                ; Write CAN ID
+                0x08010010: LDR R0, [R1, #0]           ; Load CAN ID from PduInfo
+                0x08010014: STR R0, [R4, #0]           ; Store to mailbox[0]
+                
+                ; Write DLC
+                0x08010018: LDRB R0, [R1, #4]          ; Load DLC
+                0x0801001C: STR R0, [R4, #4]           ; Store to mailbox[1]
+                
+                ; Write data (64-bit)
+                0x08010020: LDR R0, [R1, #8]           ; Data word 0
+                0x08010024: STR R0, [R4, #8]           ; Store to mailbox[2]
+                0x08010028: LDR R0, [R1, #12]          ; Data word 1
+                0x0801002C: STR R0, [R4, #12]          ; Store to mailbox[3]
+                
+                ; **NO CACHE FLUSH HERE!**
+                ; No DMB, no DSB, no cache maintenance!
+                
+                ; Trigger transmission
+                0x08010030: LDR R0, =CAN_TXBAR         ; 0x40040010
+                0x08010034: MOV R1, #1
+                0x08010038: LSL R1, R1, R5             ; Shift to mailbox bit
+                0x0801003C: STR R1, [R0]               ; Set TXBAR bit
+                
+                ; **DMA TRIGGERED IMMEDIATELY**
+                ; Cache may not have written back yet!
+                
+                0x08010040: MOV R0, #E_OK
+                0x08010044: POP {R4-R6, PC}
+                
+                **Total execution time:** ~500 ns
+                **Cache write-back time:** 100 ns - 10 ms (unpredictable)
+                **Race window:** 499.5 ns - 9.9995 ms
+                ```
+                
+                **Cache State Machine (Hardware FSM):**
+                ```
+                L1 Cache Controller FSM:
+                
+                State: IDLE
+                → CPU writes to 0x80010000
+                → Lookup cache (hit!)
+                → Update cache line (dirty bit = 1)
+                → Remain in IDLE
+                
+                State: IDLE
+                → Cache line replacement policy triggers
+                → Need to evict line (LRU, FIFO, Random)
+                → Transition to WRITEBACK
+                
+                State: WRITEBACK
+                → AXI bus request to RAM
+                → Wait for bus grant (1-10 cycles)
+                → Write 64-byte cache line to RAM
+                → Clear dirty bit
+                → Transition to IDLE
+                
+                **MEANWHILE:**
+                DMA State Machine (parallel):
+                
+                State: IDLE
+                → TXBAR write detected
+                → Transition to READ_REQUEST
+                
+                State: READ_REQUEST
+                → AXI bus request to 0x80010000
+                → **RACE with cache writeback!**
+                
+                **Outcome depends on AXI bus arbiter:**
+                - If cache writeback wins: Data OK
+                - If DMA read wins: Data CORRUPT
+                
+                AXI arbiter policy: Round-robin (50/50 chance!)
+                ```
+                
+                **Fix (Multiple Levels):**
+                ```c
+                // Fix #1: Move Message RAM to uncached region (BEST)
+                // Linker script:
+                MEMORY {
+                    UNCACHED_RAM (rwx) : ORIGIN = 0xC0000000, LENGTH = 16K
+                }
+                
+                SECTIONS {
+                    .can_msg_ram (NOLOAD) : {
+                        . = ALIGN(64);
+                        *(.can_msg_ram)
+                    } > UNCACHED_RAM
+                }
+                
+                // C code:
+                __attribute__((section(".can_msg_ram")))
+                uint32 CAN_MSG_RAM[4096];  // 16 KB, uncached
+                
+                // MPU configuration:
+                MPU_Region_InitTypeDef MPU_Init;
+                MPU_Init.Enable = MPU_REGION_ENABLE;
+                MPU_Init.BaseAddress = 0xC0000000;
+                MPU_Init.Size = MPU_REGION_SIZE_16KB;
+                MPU_Init.AccessPermission = MPU_REGION_FULL_ACCESS;
+                MPU_Init.TypeExtField = MPU_TEX_LEVEL1;
+                MPU_Init.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+                MPU_Init.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+                MPU_Init.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
+                HAL_MPU_ConfigRegion(&MPU_Init);
+                HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+                
+                // Fix #2: Explicit cache maintenance (if can't move memory)
+                Std_ReturnType Can_Write(Can_HwHandleType Hth, 
+                                         const Can_PduType* PduInfo) {
+                    uint32* mailbox = &CAN_MSG_RAM[Hth * 4];
+                    
+                    // Write data
+                    mailbox[0] = PduInfo->id;
+                    mailbox[1] = PduInfo->length;
+                    mailbox[2] = ((uint32*)PduInfo->sdu)[0];
+                    mailbox[3] = ((uint32*)PduInfo->sdu)[1];
+                    
+                    // **CRITICAL: Clean cache before DMA read**
+                    // Flush cache line to RAM
+                    SCB_CleanDCache_by_Addr((uint32_t*)mailbox, 16);
+                    
+                    // Memory barriers (ensure ordering)
+                    __DMB();  // Data Memory Barrier
+                    __DSB();  // Data Synchronization Barrier
+                    __ISB();  // Instruction Synchronization Barrier
+                    
+                    // Now trigger DMA (safe!)
+                    CAN->TXBAR = (1U << Hth);
+                    
+                    return E_OK;
+                }
+                
+                // RX path also needs cache invalidation:
+                void Can_RxISR(void) {
+                    uint32* mailbox = &CAN_MSG_RAM[rx_idx * 4];
+                    
+                    // **CRITICAL: Invalidate cache before reading DMA data**
+                    // Discard stale cache data, force read from RAM
+                    SCB_InvalidateDCache_by_Addr((uint32_t*)mailbox, 16);
+                    
+                    // Memory barriers
+                    __DMB();
+                    __DSB();
+                    
+                    // Now safe to read DMA-written data
+                    uint32 can_id = mailbox[0];
+                    uint32 data0 = mailbox[2];
+                    uint32 data1 = mailbox[3];
+                    
+                    CanIf_RxIndication(Hrh, can_id, 8, (uint8*)&data0);
+                }
+                
+                // Fix #3: Use cache-coherent DMA (hardware support)
+                // Some ARM Cortex-A have ACE (AXI Coherency Extensions)
+                // Configure CAN DMA as cache-coherent master
+                CAN_DMA_Config.CoherencyMode = DMA_COHERENT_MASTER;
+                // Hardware automatically snoops cache, no SW maintenance needed!
+                
+                // Fix #4: Disable cache for entire CAN driver (BRUTE FORCE)
+                void Can_Init(const Can_ConfigType* Config) {
+                    // Disable data cache
+                    SCB_DisableDCache();
+                    
+                    // Initialize CAN
+                    // ...
+                    
+                    // Re-enable cache (but not for Message RAM region)
+                    MPU_Config_Uncached_Region(CAN_MSG_RAM_BASE, 16 * 1024);
+                    SCB_EnableDCache();
+                }
+                ```
+                
+                **Production Impact:**
+                - 15,000 Premium ECUs affected (only high-end variant)
+                - Discovered 6 months after production start
+                - Customer complaints: "Navigation destination garbled"
+                - Traced to corrupted CAN messages (address data)
+                
+                **Detection Timeline:**
+                - Month 1: Sporadic customer reports (dismissed as user error)
+                - Month 2: 50 reports, pattern emerges (premium model only)
+                - Month 3: Test team cannot reproduce (using Cortex-M test ECU)
+                - Month 4: Field data logger installed (captures corrupt frames)
+                - Month 5: Logic analyzer trace captures cache/DMA race
+                - Month 6: Root cause identified (cache coherency)
+                - Month 7: Fix developed and validated (MPU reconfiguration)
+                - Month 8: OTA update deployed
+                
+                **Cost Breakdown:**
+                - Investigation (6 months): $2M (field debugging, equipment)
+                - Software fix: $500K (2 weeks × 15 engineers + validation)
+                - OTA deployment: $1M (infrastructure + monitoring)
+                - Customer compensation: $200 × 500 complaints = $100K
+                - Regulatory reporting (cache safety): $200K
+                - Brand reputation: Negative press articles
+                - **Total: $3.8M direct costs**
+                
+                **Lesson Learned:**
+                - ALWAYS map DMA buffers to uncached memory
+                - NEVER assume cache coherency without hardware support
+                - Test on ALL hardware variants (Cortex-M vs. Cortex-A)
+                - Enable cache debug features during development
+                - Use MMU/MPU to enforce memory access policies
+                - Static analysis tools (Polyspace) can detect cache issues
+                - Field data logging CRITICAL for intermittent bugs
+                ```
+            end note
+        }
+    
+    @enduml
