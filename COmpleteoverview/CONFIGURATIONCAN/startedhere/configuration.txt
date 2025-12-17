@@ -1,0 +1,166 @@
+CAN Stack Manual Configuration Guide
+=====================================
+
+Configuration Strategy:
+-----------------------
+I am configuring the complete CAN stack manually, starting from CanIf (CAN Interface)
+
+AUTOSAR CAN Stack Layers (Bottom-Up):
+--------------------------------------
+1. CAN Driver (MCAL Layer)
+   - Hardware abstraction
+   - Mailbox configuration
+   - Interrupt handling
+   
+2. CanIf (CAN Interface) ← STARTING HERE
+   - Software filtering
+   - L-PDU handling
+   - HOH (Hardware Object Handle) mapping
+   
+3. CanTp (CAN Transport Protocol)
+   - Segmentation/Reassembly
+   - Flow control
+   - N-PDU handling
+   
+4. PduR (PDU Router)
+   - Routing tables
+   - Gateway functionality
+   
+5. COM (Communication)
+   - Signal packing/unpacking
+   - I-PDU handling
+   
+6. ComM (Communication Manager)
+   - Network state management
+
+File Organization in Repository:
+---------------------------------
+CONFIGURATIONCAN/
+├── 01_CanDriver/
+│   ├── Can_Cfg.h
+│   ├── Can_Cfg.c
+│   ├── Can_PBcfg.c
+│   └── can_driver_notes.txt
+│
+├── 02_CanIf/
+│   ├── CanIf_Cfg.h
+│   ├── CanIf_Cfg.c
+│   ├── CanIf_PBcfg.c
+│   ├── CanIf_Lcfg.c
+│   └── canif_config_notes.txt
+│
+├── 03_CanTp/
+│   ├── CanTp_Cfg.h
+│   ├── CanTp_Cfg.c
+│   ├── CanTp_PBcfg.c
+│   └── cantp_config_notes.txt
+│
+├── 04_PduR/
+│   ├── PduR_Cfg.h
+│   ├── PduR_Cfg.c
+│   ├── PduR_PBcfg.c
+│   └── pdur_config_notes.txt
+│
+├── 05_Com/
+│   ├── Com_Cfg.h
+│   ├── Com_Cfg.c
+│   ├── Com_PBcfg.c
+│   └── com_config_notes.txt
+│
+├── diagrams/
+│   ├── canif_architecture.plantuml
+│   ├── pdu_flow.plantuml
+│   └── complete_stack_config.plantuml
+│
+└── README.md (Master configuration guide)
+
+CanIf Configuration Checklist:
+-------------------------------
+[ ] Define CanIf_ConfigType structure
+[ ] Configure CanIf_InitConfiguration
+[ ] Set up CanIf_CtrlConfig (Controller Configuration)
+[ ] Define CanIf_HrhConfig (Hardware Receive Handle)
+[ ] Define CanIf_HthConfig (Hardware Transmit Handle)
+[ ] Configure CanIf_RxPduConfig (RX L-PDUs)
+[ ] Configure CanIf_TxPduConfig (TX L-PDUs)
+[ ] Set up Software Filtering (if needed)
+[ ] Define CanIf_TxBuffer configuration
+[ ] Configure DLC check settings
+[ ] Set up notification functions
+
+Key Configuration Parameters to Track:
+---------------------------------------
+- Number of CAN Controllers: 2 (CAN0, CAN1)
+- Number of HOHs (Rx + Tx): 8 (4 HRH + 4 HTH)
+- Number of L-PDUs (Rx + Tx): 11 (6 RX + 5 TX)
+- Buffer sizes: 8 PDUs
+- DET enabled: Yes
+- Version info API: Yes
+
+PROJECT STATUS:
+===============
+✓ Repository structure created
+✓ CanIf configuration templates created
+✓ PlantUML diagrams for visualization created
+✓ Documentation and guides created
+
+FILES CREATED:
+--------------
+1. CONFIGURATIONCAN/README.md - Master project guide
+2. CONFIGURATIONCAN/QUICK_START.md - Quick reference
+3. 02_CanIf/CanIf_Cfg.h - Header with all defines
+4. 02_CanIf/CanIf_PBcfg.c - Configuration structures
+5. 02_CanIf/canif_config_notes.txt - Detailed notes
+6. diagrams/canif_architecture.plantuml - Architecture diagram
+7. diagrams/pdu_flow.plantuml - PDU flow diagram
+
+HOW TO USE THIS REPOSITORY:
+============================
+1. Review README.md for overall structure
+2. Study canif_config_notes.txt for configuration details
+3. Examine CanIf_Cfg.h and CanIf_PBcfg.c as templates
+4. Visualize using PlantUML diagrams
+5. Customize for your specific CAN network
+6. Follow QUICK_START.md for step-by-step guidance
+
+REFERENCE TO EXISTING WORK:
+============================
+- Hardware details: ../AUTOSARstackconf/deepdiveintoissue.plantuml
+- System overview: ../autosaroverview.plantuml
+- Complete stack: ../AUTOSARstackconf/autosarstackconfcomplete.plantuml
+- Design docs: ../AUTOSARstackconf/design/
+
+NEXT STEPS:
+===========
+1. Customize CanIf configuration for your messages
+2. Create CanTp configuration (for diagnostics)
+3. Create PduR configuration (for routing)
+4. Create COM configuration (for signals)
+5. Link all layers together
+
+LEARNING PATH:
+==============
+Phase 1: CanIf (Current) ← YOU ARE HERE
+  - Understand L-PDU concept
+  - Master HOH mapping
+  - Learn PDU routing
+
+Phase 2: CanTp (Next)
+  - Multi-frame messages
+  - Flow control
+  - Timing parameters
+
+Phase 3: PduR
+  - Routing tables
+  - Gateway functionality
+  - Module interconnection
+
+Phase 4: COM
+  - Signal definitions
+  - Packing/unpacking
+  - Timing and transmission modes
+
+Phase 5: Integration
+  - Complete stack testing
+  - Timing analysis
+  - Error handling

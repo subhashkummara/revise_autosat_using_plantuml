@@ -1,0 +1,55 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title LGU Processing Cycle (90ms)
+
+concise "MMIC\n(Radio)" as MMIC
+concise "HWA\n(Accelerator)" as HWA
+concise "DSP\n(Processor)" as DSP
+concise "ARM Core 1\n(RJP Mod)" as ARM1
+concise "ARM Core 2\n(T50)" as ARM2
+concise "ARM Core 3\n(BSW)" as ARM3
+
+@0
+MMIC is Sensing
+HWA is Idle
+DSP is Idle
+ARM1 is Idle
+ARM2 is Idle
+ARM3 is BSW
+
+@14
+MMIC is Modulation
+HWA is "Interference\nProc"
+
+@26
+HWA is "HWA\nproc"
+DSP is "RJP\nPart1"
+
+@38
+DSP is "RJP\nPart2"
+
+@50
+MMIC is Idle
+HWA is Idle
+ARM1 is "RJP\nMod"
+
+@60
+MMIC is Sensing
+HWA is "Interference\nProc"
+DSP is Idle
+ARM1 is Idle
+ARM2 is T50
+
+@74
+HWA is "HWA\nproc"
+
+@86
+HWA is Idle
+DSP is "RJP\nPart1"
+
+@90
+MMIC is Modulation
+
+@enduml

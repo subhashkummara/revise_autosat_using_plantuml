@@ -1,0 +1,126 @@
+CanIf Configuration Notes
+=========================
+
+Overview:
+---------
+CAN Interface sits between CAN Driver (MCAL) and upper layers (CanTp, PduR, COM).
+It provides abstraction from CAN hardware and handles L-PDU routing.
+
+Key Responsibilities:
+---------------------
+1. L-PDU to HOH mapping (both RX and TX)
+2. Software filtering (additional to hardware filters)
+3. TX buffering and confirmation
+4. DLC checking
+5. Notification to upper layers
+
+Configuration Steps:
+--------------------
+
+STEP 1: Define Controllers
+---------------------------
+- How many CAN controllers? (e.g., CAN0, CAN1)
+- Controller IDs
+- Wake-up support needed?
+
+Example:
+  Controller 0: CAN0 (Body CAN, 500 kbps)
+  Controller 1: CAN1 (Powertrain CAN, 500 kbps)
+
+STEP 2: Map Hardware Object Handles (HOHs)
+-------------------------------------------
+From Can Driver configuration:
+- HRH (Hardware Receive Handle): Maps to hardware RX mailboxes/FIFOs
+- HTH (Hardware Transmit Handle): Maps to hardware TX mailboxes
+
+Example:
+  HRH_0 -> Controller 0, RX FIFO 0 (IDs 0x100-0x1FF)
+  HRH_1 -> Controller 0, RX FIFO 1 (IDs 0x200-0x2FF)
+  HTH_0 -> Controller 0, TX Mailbox 0
+  HTH_1 -> Controller 0, TX Mailbox 1
+
+STEP 3: Define RX L-PDUs
+-------------------------
+For each incoming message:
+- L-PDU ID (unique in system)
+- CAN ID (11-bit or 29-bit)
+- DLC (Data Length Code)
+- HRH mapping
+- Upper layer module (CanTp, PduR, COM)
+- Upper layer PDU ID
+- User RX indication callback
+
+Example:
+  RxPdu_EngineSpeed:
+    - CanIfRxPduId: 0
+    - CanId: 0x123
+    - CanIdType: STANDARD_CAN
+    - CanIfRxPduDlc: 8
+    - CanIfRxPduHrhIdRef: HRH_0
+    - CanIfRxPduUserRxIndicationUL: CAN_TP
+    - CanIfRxPduUserRxIndicationName: CanTp_RxIndication
+
+STEP 4: Define TX L-PDUs
+-------------------------
+For each outgoing message:
+- L-PDU ID (unique in system)
+- CAN ID
+- DLC
+- HTH mapping
+- TX buffer configuration
+- Trigger transmit callback
+
+Example:
+  TxPdu_VehicleSpeed:
+    - CanIfTxPduId: 0
+    - CanId: 0x456
+    - CanIdType: STANDARD_CAN
+    - CanIfTxPduDlc: 8
+    - CanIfTxPduHthIdRef: HTH_0
+    - CanIfTxPduUserTxConfirmationUL: COM
+    - CanIfTxPduBuffering: TRUE
+
+STEP 5: Configure Software Filters (Optional)
+----------------------------------------------
+Additional filtering beyond hardware:
+- Range-based filtering
+- Complex ID patterns
+- Dynamic filtering
+
+STEP 6: Set General Parameters
+-------------------------------
+- CanIfDevErrorDetect: TRUE/FALSE
+- CanIfPublicCfg: TRUE/FALSE
+- CanIfVersionInfoApi: TRUE/FALSE
+- CanIfPublicIcomSupport: TRUE/FALSE
+- CanIfPublicMultipleDrvSupport: FALSE
+- CanIfPublicReadRxPduDataApi: TRUE/FALSE
+- CanIfPublicReadRxPduNotifyStatusApi: FALSE
+- CanIfPublicReadTxPduNotifyStatusApi: FALSE
+- CanIfPublicSetDynamicTxIdApi: FALSE
+- CanIfPublicTxBuffering: TRUE
+- CanIfPublicTxConfirmPollingSupport: FALSE
+
+Critical Configuration Tips:
+-----------------------------
+1. L-PDU IDs must be unique across entire system
+2. HRH/HTH references must match Can Driver configuration
+3. DLC should match actual message definition
+4. Upper layer callbacks must be correctly specified
+5. TX buffering recommended for high-throughput systems
+6. Consider TX priority if multiple PDUs share same HTH
+
+Common Pitfalls:
+----------------
+- Mismatch between CanIf PDU ID and upper layer PDU ID
+- Wrong HRH/HTH references
+- DLC mismatch with actual messages
+- Missing notification callbacks
+- Buffer overflow due to insufficient TX buffering
+
+Next Steps:
+-----------
+1. Create CanIf_Cfg.h with configuration defines
+2. Create CanIf_Lcfg.c with link-time configuration
+3. Create CanIf_PBcfg.c with post-build configuration
+4. Create example PlantUML diagram showing PDU flow

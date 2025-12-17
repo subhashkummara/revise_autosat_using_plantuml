@@ -1,0 +1,52 @@
+@startuml
+!theme plain
+
+package "LGU Hardware" {
+    component [MMIC\nRadio Transceiver] as MMIC
+    component [HWA\nHardware Accelerator] as HWA
+    component [DSP\nSignal Processor] as DSP
+}
+
+package "ARM Processor" {
+    component [Core: RJP RadarCycle] as ARM1
+    component [Core: T50 Scheduler] as ARM2
+    component [Core: T10 BSW] as ARM3
+}
+
+package "Processing Functions" {
+    usecase "FFT1, FFT2\n(Frequency Analysis)" as FFT
+    usecase "DET, TxnEst\n(Detection & Timing)" as DET
+    usecase "DBF, NC, CFAR\n(Beamforming & Detection)" as DBF
+    usecase "2FarEst, Deep BII\n(Estimation)" as EST
+}
+
+cloud "Radio Signals" as Radio
+
+Radio --> MMIC : Receive/Transmit
+MMIC --> HWA : Digital Data
+HWA --> DSP : Processed Signals
+DSP --> ARM1 : Calculated Data
+ARM1 ..> FFT
+ARM1 ..> DET
+ARM1 ..> DBF
+ARM1 ..> EST
+
+ARM2 --> ARM1 : Schedule
+ARM2 --> ARM3 : Schedule
+
+ARM3 --> ARM3 : System\nMonitoring
+
+note right of ARM3
+  Runs continuously
+  Location Latency: 41ms
+  BSW = Basic Software
+  COM = Communication tasks
+end note
+
+note bottom of DSP
+  RJP Part 1: Detection & Timing
+  RJP Part 2: Deep Processing
+  Total: 12ms + 15ms = 27ms
+end note
+
+@enduml

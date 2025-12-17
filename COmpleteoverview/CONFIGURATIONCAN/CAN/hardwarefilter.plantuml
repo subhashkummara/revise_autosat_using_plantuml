@@ -1,0 +1,304 @@
+@startuml CAN_Hardware_Filter_Configurations
+!theme plain
+title CAN Hardware Filter Code & Mask Combinations\n(TI AWR294x MCAN IP 3.2.1 - Standard & Extended IDs)
+
+skinparam backgroundColor #FEFEFE
+skinparam noteBackgroundColor #FFFACD
+skinparam noteBorderColor #FF6347
+skinparam classBorderThickness 2
+
+' ============================================================================
+' FILTER THEORY
+' ============================================================================
+package "Filter Matching Logic" #LightBlue {
+    class "Filter Algorithm" as FilterAlgo {
+        **Formula:**
+        Accept = (RxID & Mask) == (FilterCode & Mask)
+        
+        **Mask Bits:**
+        1 = Must Match (check this bit)
+        0 = Don't Care (ignore this bit)
+        
+        **Filter Code:**
+        Expected value for bits where Mask=1
+    }
+}
+
+note right of FilterAlgo
+**Example Calculation:**
+RxID:        0x123 = 0001 0010 0011
+FilterCode:  0x120 = 0001 0010 0000
+Mask:        0x7F0 = 0111 1111 0000
+
+RxID & Mask       = 0001 0010 0000 (0x120)
+FilterCode & Mask = 0001 0010 0000 (0x120)
+Result: **MATCH** ✅
+end note
+
+' ============================================================================
+' SCENARIO 1: ACCEPT SINGLE ID
+' ============================================================================
+package "Scenario 1: Single ID Filter" #PaleGreen {
+    class "Accept ONLY 0x123" as Single {
+        **Configuration:**
+        FilterCode = 0x123
+        Mask       = 0x7FF (all bits must match)
+        
+        **Accepted IDs:**
+        • 0x123 ✅
+        
+        **Rejected IDs:**
+        • 0x122 ❌
+        • 0x124 ❌
+        • 0x120 ❌
+    }
+    
+    note bottom of Single
+    **Use Case:** Diagnostic request
+    Tester Physical Address: 0x7E0
+    FilterCode = 0x7E0
+    Mask       = 0x7FF
+    Only 0x7E0 passes through
+    end note
+}
+
+' ============================================================================
+' SCENARIO 2: ACCEPT RANGE OF IDS
+' ============================================================================
+package "Scenario 2: Range Filter (0x100-0x10F)" #LightCoral {
+    class "Accept 0x100 to 0x10F" as Range16 {
+        **Configuration:**
+        FilterCode = 0x100
+        Mask       = 0x7F0 (mask out lower 4 bits)
+        
+        **Binary Analysis:**
+        0x100 = 0001 0000 0000
+        0x10F = 0001 0000 1111
+        Mask  = 0111 1111 0000
+        
+        **Accepted IDs:**
+        • 0x100 to 0x10F ✅ (16 IDs)
+        
+        **Rejected IDs:**
+        • 0x0FF ❌
+        • 0x110 ❌
+    }
+    
+    note bottom of Range16
+    **Use Case:** Sensor block messages
+    Object List: 0x200-0x20F (16 objects)
+    FilterCode = 0x200
+    Mask       = 0x7F0
+    end note
+}
+
+' ============================================================================
+' SCENARIO 3: MULTIPLE SPECIFIC IDS
+' ============================================================================
+package "Scenario 3: Accept 0x200, 0x210, 0x220, 0x230" as Multi {
+    class "Pattern Matching (Every 16 IDs)" {
+        **Configuration:**
+        FilterCode = 0x200
+        Mask       = 0x7CF (check bits 11-10,7-4)
+        
+        **Binary Analysis:**
+        0x200 = 0010 0000 0000
+        0x210 = 0010 0001 0000
+        0x220 = 0010 0010 0000
+        0x230 = 0010 0011 0000
+        Mask  = 0111 1100 1111
+        
+        **Accepted IDs:**
+        • 0x200-0x20F ✅
+        • 0x210-0x21F ✅
+        • 0x220-0x22F ✅
+        • 0x230-0x23F ✅
+    }
+}
+
+note right of Multi
+**Alternative: Use 4 Separate Filters**
+Filter 1: Code=0x200, Mask=0x7FF
+Filter 2: Code=0x210, Mask=0x7FF
+Filter 3: Code=0x220, Mask=0x7FF
+Filter 4: Code=0x230, Mask=0x7FF
+(Better precision, uses more filters)
+end note
+
+' ============================================================================
+' SCENARIO 4: AUTOSAR SGU EXAMPLE
+' ============================================================================
+package "Scenario 4: AUTOSAR Radar SGU Messages" #Lavender {
+    class "Accept SGU Block (0x300-0x3FF)" {
+        **Configuration:**
+        FilterCode = 0x300
+        Mask       = 0x700 (upper 3 bits only)
+        
+        **Binary:**
+        0x300 = 0011 0000 0000
+        0x3FF = 0011 1111 1111
+        Mask  = 0111 0000 0000
+        
+        **Accepted Range:**
+        • 0x300 to 0x3FF ✅ (256 IDs)
+        
+        **Messages:**
+        • 0x300 = Object Header
+        • 0x310 = Object #1
+        • 0x320 = Object #2
+        • ...
+        • 0x3F0 = Corridor Data
+    }
+}
+
+' ============================================================================
+' SCENARIO 5: DIAGNOSTIC SERVICES
+' ============================================================================
+package "Scenario 5: Diagnostic Messages (UDS)" #Yellow {
+    class "Accept 0x7E0-0x7E7 (8 ECUs)" {
+        **Configuration:**
+        FilterCode = 0x7E0
+        Mask       = 0x7F8 (lower 3 bits don't care)
+        
+        **Binary:**
+        0x7E0 = 0111 1110 0000
+        0x7E7 = 0111 1110 0111
+        Mask  = 0111 1111 1000
+        
+        **Accepted IDs:**
+        • 0x7E0 (ECU 0) ✅
+        • 0x7E1 (ECU 1) ✅
+        • ...
+        • 0x7E7 (ECU 7) ✅
+    }
+}
+
+' ============================================================================
+' SCENARIO 6: EXTENDED IDS (29-BIT)
+' ============================================================================
+package "Scenario 6: Extended ID Filter" #LightGreen {
+    class "Accept 0x18FF1234 (CAN-FD)" {
+        **Configuration (29-bit):**
+        FilterCode = 0x18FF1234
+        Mask       = 0x1FFFFFFF (all bits)
+        
+        **Binary (29-bit):**
+        ID   = 0001 1000 1111 1111 0001 0010 0011 0100
+        Mask = 0001 1111 1111 1111 1111 1111 1111 1111
+        
+        **Accepted:**
+        • 0x18FF1234 ✅ ONLY
+        
+        **Use Case:**
+        J1939 PGN filtering
+        Priority: 6 (bits 28-26)
+        PGN: 0xFF12 (bits 25-8)
+        Source: 0x34 (bits 7-0)
+    }
+}
+
+' ============================================================================
+' SCENARIO 7: REAL-WORLD RADAR EXAMPLE
+' ============================================================================
+package "Scenario 7: Bosch Radar CAN Config" #PaleTurquoise {
+    class "Production Example" {
+        **Filter 0: SGU Objects (0x300-0x3FF)**
+        Code = 0x300
+        Mask = 0x700
+        
+        **Filter 1: Diagnostic Tester (0x7E0)**
+        Code = 0x7E0
+        Mask = 0x7FF
+        
+        **Filter 2: Network Mgmt (0x600-0x6FF)**
+        Code = 0x600
+        Mask = 0x700
+        
+        **Filter 3: FDC Messages (0x400-0x40F)**
+        Code = 0x400
+        Mask = 0x7F0
+        
+        **Total Filters Used:** 4 out of 128 available
+    }
+}
+
+note right of "Production Example"
+**TI AWR294x MCAN Capacity:**
+• Standard Filters: 128 max
+• Extended Filters: 64 max
+• Rx FIFO 0/1: 64 elements each
+• Dedicated Rx Buffers: 64 max
+end note
+
+' ============================================================================
+' PRACTICAL MASK CHEATSHEET
+' ============================================================================
+package "Quick Reference: Mask Values" #LightYellow {
+    class "Common Mask Patterns (Standard 11-bit)" {
+        **Accept Single ID:**
+        Mask = 0x7FF (111 1111 1111)
+        
+        **Accept 2 IDs (LSB toggle):**
+        Mask = 0x7FE (111 1111 1110)
+        Example: 0x100 & 0x101
+        
+        **Accept 4 IDs:**
+        Mask = 0x7FC (111 1111 1100)
+        Example: 0x100-0x103
+        
+        **Accept 8 IDs:**
+        Mask = 0x7F8 (111 1111 1000)
+        Example: 0x100-0x107
+        
+        **Accept 16 IDs:**
+        Mask = 0x7F0 (111 1111 0000)
+        Example: 0x100-0x10F
+        
+        **Accept 32 IDs:**
+        Mask = 0x7E0 (111 1110 0000)
+        Example: 0x100-0x11F
+        
+        **Accept 64 IDs:**
+        Mask = 0x7C0 (111 1100 0000)
+        Example: 0x100-0x13F
+        
+        **Accept 128 IDs:**
+        Mask = 0x780 (111 1000 0000)
+        Example: 0x100-0x17F
+        
+        **Accept 256 IDs:**
+        Mask = 0x700 (111 0000 0000)
+        Example: 0x100-0x1FF
+    }
+}
+
+' ============================================================================
+' CODE EXAMPLES
+' ============================================================================
+package "ABACUS Configuration Example" #LightPink {
+    class "ARXML Filter Setup" {
+        <filter id="0">
+            <code>0x300</code>
+            <mask>0x700</mask>
+            <type>STANDARD</type>
+            <action>STORE_RXFIFO0</action>
+        </filter>
+        
+        <filter id="1">
+            <code>0x7E0</code>
+            <mask>0x7FF</mask>
+            <type>STANDARD</type>
+            <action>STORE_RXBUFFER</action>
+            <bufferIndex>0</bufferIndex>
+        </filter>
+    }
+}
+
+' ============================================================================
+' RELATIONSHIPS
+' ============================================================================
+FilterAlgo -down-> Single : "Apply to\nSingle ID"
+FilterAlgo -down-> Range16 : "Apply to\nRange"
+FilterAlgo -down-> Multi : "Apply to\nMultiple"
+
+@enduml

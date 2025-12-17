@@ -1,0 +1,60 @@
+@startuml
+!theme plain
+
+title Detailed LGU Processing Pipeline
+
+actor "Radio\nSignal" as Signal
+participant "MMIC\n(Radio Interface)" as MMIC
+participant "HWA\n(Hardware Accelerator)" as HWA
+participant "DSP\n(Digital Signal Processor)" as DSP
+participant "ARM RJP\n(Radar Job Processor)" as ARM_RJP
+participant "ARM T50\n(Task Manager)" as ARM_T50
+participant "ARM BSW\n(Basic Software)" as ARM_BSW
+
+== Cycle Start (0-50ms) ==
+
+Signal -> MMIC: Incoming radio waves
+activate MMIC #Yellow
+note right: **Sensing (14ms)**\nCapturing radio signals
+
+MMIC -> MMIC: Modulate signal
+note right: **Modulation (14ms)**\nConverting to digital
+
+MMIC -> HWA: Send digital signal
+deactivate MMIC
+activate HWA #Orange
+
+HWA -> HWA: Interference Processing
+note right: **Remove noise (14ms)**
+
+HWA -> HWA: HWA Processing
+note right: **Fast computations (12ms)**
+
+HWA -> DSP: Cleaned signal
+deactivate HWA
+activate DSP #LightGreen
+
+DSP -> DSP: RJP Part 1
+note right: **First processing (12ms)**\nTime estimation
+
+DSP -> DSP: RJP Part 2
+note right: **Second processing (15ms)**\nDeep calculations
+
+DSP -> ARM_RJP: Processed data
+deactivate DSP
+activate ARM_RJP #LightBlue
+
+ARM_RJP -> ARM_RJP: RJP Modulation
+note right: **Software processing**\nFinal calculations
+
+deactivate ARM_RJP
+
+== Cycle Continues (50-90ms) ==
+
+ARM_BSW -> ARM_BSW: BSW tasks
+note right: **Runs every 41ms**\nSystem monitoring
+
+ARM_T50 -> ARM_T50: T50 tasks
+note right: **Periodic task**\nScheduling & control
+
+@enduml

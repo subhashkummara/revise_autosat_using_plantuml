@@ -1,0 +1,31 @@
+@startuml
+!theme plain
+
+title LGU Location Latency Budget (41ms)
+
+|MMIC|
+start
+:Sensing\n(14ms);
+:Modulation\n(14ms);
+
+|HWA|
+:Interference Processing\n(14ms);
+:HWA Processing\n(12ms);
+
+|DSP|
+:RJP Part 1\n(12ms);
+:RJP Part 2\n(15ms);
+
+|ARM|
+:RJP Modulation\n(23ms);
+
+|Result|
+:Location Calculated;
+stop
+
+note right
+**Total Latency: 41ms**
+From sensing to final location
+end note
+
+@enduml

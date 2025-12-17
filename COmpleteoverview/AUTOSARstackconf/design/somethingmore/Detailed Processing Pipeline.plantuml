@@ -1,0 +1,67 @@
+@startuml
+!theme plain
+
+title SGU Object Detection & Tracking Pipeline
+
+actor "Radar\nReflection" as Signal
+participant "MMIC\n(Radar Sensor)" as MMIC
+participant "HWA\n(Hardware Accelerator)" as HWA
+participant "DSP\n(Digital Signal Processor)" as DSP
+participant "ARM PER1\n(Object Tracking)" as PER1
+participant "ARM PER2\n(Object Classification)" as PER2
+
+== Cycle Start (0-50ms) ==
+
+Signal -> MMIC: Reflected radar waves\nfrom objects
+activate MMIC #Yellow
+note right: **Sensing (14ms)**\nContinuous radar reception\n**Key**: Longer sensing time\nthan LGU
+
+MMIC -> MMIC: Continue Sensing
+note right: **Sensing (14ms)**\nDouble sensing period\nfor better object detection
+
+MMIC -> HWA: Send radar data
+deactivate MMIC
+activate HWA #Orange
+
+HWA -> HWA: Interference Processing
+note right: **Remove clutter (14ms)**\nFilter out noise
+
+HWA -> HWA: HWA Processing\n(FFT, DBF, CFAR)
+note right: **Fast computations (12ms)**\n- FFT: Frequency analysis\n- DBF: Direction finding\n- CFAR: Target detection
+
+HWA -> DSP: Detected targets
+deactivate HWA
+activate DSP #LightGreen
+
+DSP -> DSP: RSP Part 1
+note right: **Detection (12ms)**\nDET, 1TxnEst\nInitial object detection
+
+DSP -> DSP: RSP Part 2
+note right: **Estimation (15ms)**\n2FarEst processing\nDistance & velocity
+
+DSP -> DSP: PER1 Processing
+note right: **Object Tracking (20ms)**\nTrack moving objects\nPredict trajectories
+
+DSP -> PER1: Object tracks
+deactivate DSP
+activate PER1 #LightBlue
+
+PER1 -> PER1: Object Tracking
+note right: **Track refinement**\nMaintain object history
+
+PER1 -> PER2: Tracked objects
+deactivate PER1
+activate PER2 #Pink
+
+PER2 -> PER2: Object Classification
+note right: **PER2 + BSW**\n- Object type (car, pedestrian)\n- Road boundary detection\n- Plausibility checks\n- Corner FCT (function)
+
+deactivate PER2
+
+note right of PER2
+**Runs every ~8ms**
+Continuous monitoring
+MAL, BLD, Preprocessing
+end note
+
+@enduml

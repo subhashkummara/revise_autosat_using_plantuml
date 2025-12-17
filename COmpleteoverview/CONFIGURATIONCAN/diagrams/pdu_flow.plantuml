@@ -1,0 +1,151 @@
+@startuml CanIf_PDU_Flow
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+
+title CanIf Configuration - L-PDU Flow Example
+
+participant "COM Layer" as COM
+participant "CanIf" as CanIf
+participant "Can Driver" as CanDrv
+participant "CAN Hardware" as HW
+
+== Configuration Context ==
+note over CanIf
+**CanIf Configuration:**
+- Controller: CAN0 (ID=0)
+- HTH_0: High Priority TX
+- HRH_0: RX FIFO 0
+- TxPdu: GearPosition (ID=0, CAN ID=0x456)
+- RxPdu: EngineSpeed (ID=0, CAN ID=0x123)
+end note
+
+== TX Path: Sending GearPosition ==
+
+COM -> CanIf: CanIf_Transmit(TxPduId=0, PduInfo)
+note right
+**Input:**
+- TxPduId = 0 (GearPosition)
+- Data = [0x01, 0x02, ...]
+- Length = 8 bytes
+end note
+
+CanIf -> CanIf: Lookup TxPduConfig[0]
+note right
+**Configuration Lookup:**
+- CanId = 0x456
+- DLC = 8
+- HTH = HTH_0
+- Upper Layer = COM
+end note
+
+CanIf -> CanDrv: Can_Write(Hth=0, PduInfo)
+note right
+**PDU Transformation:**
+CanIf maps:
+- TxPduId (0) → HTH (0)
+- Adds CAN ID (0x456)
+- Validates DLC
+end note
+
+CanDrv -> HW: Write to TX Mailbox 0
+note right
+**Hardware Level:**
+Mailbox 0 Structure:
+[0x00]: 0x00000456 (CAN ID)
+[0x04]: 0x00000008 (DLC=8)
+[0x08]: 0x01020304 (Data)
+[0x0C]: 0x05060708 (Data)
+end note
+
+HW -> HW: Arbitration & Transmission
+HW --> CanDrv: TX Complete IRQ
+CanDrv --> CanIf: CanIf_TxConfirmation(PduId=0)
+
+CanIf -> CanIf: Lookup TxPduConfig[0].UL
+note right
+**Callback Routing:**
+- Upper Layer = COM
+- Callback = Com_TxConfirmation
+end note
+
+CanIf --> COM: Com_TxConfirmation(TxPduId=0)
+
+== RX Path: Receiving EngineSpeed ==
+
+HW -> HW: Frame Received (CAN ID=0x123)
+note right
+**Hardware Reception:**
+FIFO 0 Entry:
+[0x00]: 0x00000123 (CAN ID)
+[0x04]: 0x00000008 (DLC=8)
+[0x08]: 0xDEADBEEF (Data)
+[0x0C]: 0xCAFEBABE (Data)
+end note
+
+HW -> CanDrv: RX IRQ
+CanDrv -> CanDrv: Read from HRH_0 (FIFO 0)
+CanDrv -> CanIf: CanIf_RxIndication(Hrh=0, CanId=0x123, ...)
+
+CanIf -> CanIf: Search RxPduConfig by CanId
+note right
+**L-PDU Lookup:**
+For HRH=0, CanId=0x123:
+→ Found: RxPduConfig[0]
+  - RxPduId = 0 (EngineSpeed)
+  - DLC expected = 8 ✓
+  - Upper Layer = COM
+end note
+
+CanIf -> CanIf: DLC Check
+alt DLC matches
+    CanIf -> CanIf: Software Filter (if enabled)
+    CanIf -> CanIf: Store in buffer (if enabled)
+    
+    CanIf -> COM: Com_RxIndication(RxPduId=0, PduInfo)
+    note right
+    **Upper Layer Notification:**
+    - RxPduId = 0 (EngineSpeed)
+    - Data pointer
+    - Length = 8
+    end note
+    
+    COM -> COM: Extract signals from PDU
+else DLC mismatch
+    CanIf -> CanIf: DET Error
+    note right
+    **Error Handling:**
+    Expected DLC: 8
+    Received DLC: X
+    → Report to DET
+    → Discard message
+    end note
+end
+
+== Configuration-to-Runtime Mapping ==
+
+note over COM, HW
+**Key Configuration Points:**
+
+1. **RX L-PDU Configuration (EngineSpeed):**
+   - CanIfRxPduId: 0 (Used by COM)
+   - CanId: 0x123 (Hardware identifier)
+   - HRH: 0 (Hardware FIFO mapping)
+   - Upper Layer: COM (Callback routing)
+
+2. **TX L-PDU Configuration (GearPosition):**
+   - CanIfTxPduId: 0 (Used by COM)
+   - CanId: 0x456 (Hardware identifier)
+   - HTH: 0 (Hardware mailbox mapping)
+   - Upper Layer: COM (Confirmation routing)
+
+3. **HOH Mapping:**
+   - HRH_0 → CAN Controller 0, FIFO 0
+   - HTH_0 → CAN Controller 0, TX Mailbox 0
+
+4. **ID Translation:**
+   - Upper layers use: PduId (logical)
+   - CanIf translates to: CanId (physical)
+   - Hardware uses: Mailbox addresses
+end note
+
+@enduml

@@ -1,0 +1,109 @@
+@startuml CanIf_Architecture
+!theme cerulean-outline
+skinparam backgroundColor #FEFEFE
+
+title AUTOSAR CanIf Configuration Architecture
+
+package "Upper Layers" {
+    rectangle "COM" as COM #E3F2FD
+    rectangle "CanTp" as CanTp #E3F2FD
+    rectangle "PduR" as PduR #E3F2FD
+}
+
+package "CanIf Layer" #FFF9C4 {
+    
+    rectangle "CanIf Controller Management" as CtrlMgmt {
+        note right
+            **Configuration:**
+            - CanIfCtrlCfg[]
+            - Controller IDs
+            - Wake-up support
+        end note
+    }
+    
+    rectangle "CanIf RX Path" as RxPath {
+        collections "RxPdu Config" as RxPduCfg
+        note right of RxPduCfg
+            **Per RX L-PDU:**
+            - CanIfRxPduId
+            - CanId (0x123)
+            - DLC (8 bytes)
+            - HRH reference
+            - Upper layer UL
+            - Callback function
+        end note
+        
+        rectangle "Software Filter" as SwFilter
+        rectangle "RX Indication Handler" as RxHandler
+    }
+    
+    rectangle "CanIf TX Path" as TxPath {
+        collections "TxPdu Config" as TxPduCfg
+        note right of TxPduCfg
+            **Per TX L-PDU:**
+            - CanIfTxPduId
+            - CanId (0x456)
+            - DLC (8 bytes)
+            - HTH reference
+            - Buffering enabled
+            - Priority
+        end note
+        
+        rectangle "TX Buffer" as TxBuffer
+        rectangle "TX Confirmation Handler" as TxHandler
+    }
+    
+    rectangle "HOH Mapping" as HOHMap {
+        note right
+            **Hardware Objects:**
+            HRH_0 → FIFO 0 (RX)
+            HRH_1 → FIFO 1 (RX)
+            HTH_0 → Mailbox 0 (TX)
+            HTH_1 → Mailbox 1 (TX)
+        end note
+    }
+}
+
+package "CAN Driver (MCAL)" {
+    rectangle "CAN Controller 0" as CanCtrl0 #FFCDD2
+    rectangle "Hardware Mailboxes" as Mailboxes #FFCDD2 {
+        storage "RX FIFO 0" as FIFO0
+        storage "RX FIFO 1" as FIFO1
+        storage "TX Mailbox 0" as TX0
+        storage "TX Mailbox 1" as TX1
+    }
+}
+
+' Connections - RX Path
+FIFO0 -up-> RxPath : "Can_RxIndication(HRH_0)"
+FIFO1 -up-> RxPath : "Can_RxIndication(HRH_1)"
+RxPath --> SwFilter
+SwFilter --> RxHandler
+RxHandler -up-> COM : "Com_RxIndication()"
+RxHandler -up-> CanTp : "CanTp_RxIndication()"
+RxHandler -up-> PduR : "PduR_CanIfRxIndication()"
+
+' Connections - TX Path
+COM -down-> TxPath : "CanIf_Transmit(TxPduId)"
+CanTp -down-> TxPath : "CanIf_Transmit(TxPduId)"
+PduR -down-> TxPath : "CanIf_Transmit(TxPduId)"
+TxPath --> TxBuffer
+TxBuffer -down-> TX0 : "Can_Write(HTH_0)"
+TxBuffer -down-> TX1 : "Can_Write(HTH_1)"
+TX0 -up-> TxHandler : "CanIf_TxConfirmation()"
+TX1 -up-> TxHandler : "CanIf_TxConfirmation()"
+
+' HOH Mapping
+HOHMap ..> FIFO0
+HOHMap ..> FIFO1
+HOHMap ..> TX0
+HOHMap ..> TX1
+
+note bottom
+    **Configuration Files:**
+    • CanIf_Cfg.h - Compile-time constants
+    • CanIf_Lcfg.c - Link-time configuration
+    • CanIf_PBcfg.c - Post-build configuration
+end note
+
+@enduml

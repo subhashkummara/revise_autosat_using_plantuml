@@ -1,0 +1,61 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title SGU Processing Cycle (50ms) - Object Detection Focus
+
+concise "MMIC\n(Radar)" as MMIC
+concise "HWA\n(Accelerator)" as HWA
+concise "DSP\n(Processor)" as DSP
+concise "ARM\n(PER1)" as PER1
+concise "ARM\n(PER2+BSW)" as PER2
+
+@0
+MMIC is Sensing
+HWA is Idle
+DSP is Idle
+PER1 is Idle
+PER2 is "PER2+BSW"
+
+@14
+MMIC is Sensing
+HWA is "Interference\nProc"
+
+@26
+HWA is "HWA\nproc"
+DSP is "RSP\nPart1"
+
+@38
+DSP is "RSP\nPart2"
+
+@50
+MMIC is Modulation
+DSP is "PER1"
+PER1 is "PER1"
+PER2 is "PER2+BSW"
+
+@58
+DSP is Idle
+
+@64
+MMIC is Sensing
+HWA is "Interference\nProc"
+
+@78
+HWA is "HWA\nproc"
+DSP is "RSP\nPart1"
+
+@90
+DSP is "RSP\nPart2"
+MMIC is Sensing
+
+@108
+DSP is "PER1"
+PER1 is "PER1"
+
+note bottom
+**Object Latency: 61ms**
+From sensing to object tracking complete
+end note
+
+@enduml

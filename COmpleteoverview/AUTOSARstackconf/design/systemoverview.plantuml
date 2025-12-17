@@ -1,0 +1,45 @@
+@startuml
+!define RECTANGLE class
+
+skinparam backgroundColor #FFFFFF
+skinparam component {
+    BackgroundColor<<hardware>> LightBlue
+    BackgroundColor<<software>> LightGreen
+    BackgroundColor<<processing>> Yellow
+}
+
+package "Location Gateway Unit (LGU)" {
+    
+    component "MMIC\n(Radio Interface)" <<hardware>> as MMIC
+    note right of MMIC
+        Receives/sends radio signals
+        Like a radio antenna + converter
+    end note
+    
+    component "HWA\n(Hardware Accelerator)" <<hardware>> as HWA
+    note right of HWA
+        Fast processor for specific tasks
+        Like a graphics card for radio
+    end note
+    
+    component "DSP\n(Signal Processor)" <<processing>> as DSP
+    note right of DSP
+        Processes radio data
+        Splits into Part 1 & Part 2
+    end note
+    
+    component "ARM Cores\n(Main Processor)" <<software>> as ARM
+    note right of ARM
+        Runs software applications
+        Multiple cores do different jobs
+    end note
+    
+    MMIC -down-> HWA : Raw radio data
+    HWA -down-> DSP : Processed signals
+    DSP -down-> ARM : Digital data
+    ARM -up-> DSP : Control commands
+    DSP -up-> HWA : Modulated data
+    HWA -up-> MMIC : Transmit signals
+}
+
+@enduml

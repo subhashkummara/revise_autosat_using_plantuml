@@ -1,0 +1,165 @@
+@startuml Middleware_Scheduling_Optimization
+
+!define CRITICAL #FFB6C1
+!define OPTIMIZED #90EE90
+!define PROBLEM #FFD700
+
+title Middleware Design: Why Scheduling Optimization is Critical
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FAFAFA
+skinparam shadowing false
+
+package "Resource Optimization Goal" {
+    component [Resource Optimized\nMiddleware] as Goal #90EE90
+}
+
+package "Scheduling Optimization Impact" {
+    
+    rectangle "Fixed Scheduling Cycles" as FixedSched #OPTIMIZED {
+        card "✓ Minimizes RAM\nConsumption" as RAM
+        card "✓ Reduces Chunks\nper Mempool" as Chunks
+        card "✓ Predictable\nExecution" as Predict
+        
+        RAM -down-> Chunks
+        Chunks -down-> Predict
+    }
+    
+    rectangle "Variable/Non-Optimized Scheduling" as VarSched #CRITICAL {
+        card "✗ Increased Memory\nFootprint" as MemWaste
+        card "✗ Multiple Mempool\nChunks Needed" as MultiChunk
+        card "✗ Data Inconsistency\nRisk" as DataRisk
+        
+        MemWaste -down-> MultiChunk
+        MultiChunk -down-> DataRisk
+    }
+}
+
+package "Design Constraints for Optimal Scheduling" {
+    
+    rectangle "Minimize Runnables & Ports" as MinRunnable #OPTIMIZED {
+        note right
+            **Why:**
+            • Reduces context switching overhead
+            • Lower RAM consumption
+            • Better CPU utilization
+            • Ensures atomic data delivery
+        end note
+        
+        card "No Data Preprocessing\nRunnables" as NoPreproc
+        card "No Gen5 Spp\nRunnables" as NoGen5
+        card "No Atomic Daddy\nRunnables" as NoAtomic
+        card "SW Architect\nApproval Required" as Approval
+        
+        NoPreproc -down-> NoGen5
+        NoGen5 -down-> NoAtomic
+        NoAtomic -down-> Approval
+    }
+    
+    rectangle "Scheduling Rules" as SchedRules #OPTIMIZED {
+        card "Task Context\nONLY" as TaskOnly
+        card "NO Interrupt\nContext" as NoISR
+        
+        TaskOnly -down-> NoISR
+        
+        note right of NoISR
+            **Why Task Context Only:**
+            • Deterministic execution
+            • Avoids priority inversion
+            • Predictable timing behavior
+            • Easier debugging/analysis
+        end note
+    }
+}
+
+package "Benefits of Optimized Scheduling" {
+    
+    rectangle "Memory Efficiency" as MemEff #OPTIMIZED {
+        component [Daddy Data Packets\nOptimized] as DaddyOpt
+        component [Fewer Mempool\nChunks] as FewChunks
+        component [Lower RAM\nFootprint] as LowRAM
+        
+        DaddyOpt -down-> FewChunks
+        FewChunks -down-> LowRAM
+    }
+    
+    rectangle "Data Consistency" as DataCons #OPTIMIZED {
+        component [Atomic Delivery] as Atomic
+        component [No Race Conditions] as NoRace
+        component [Predictable State] as PredState
+        
+        Atomic -down-> NoRace
+        NoRace -down-> PredState
+    }
+    
+    rectangle "Interface Stability" as InterfaceStab #OPTIMIZED {
+        component [Fixed Interfaces] as FixedInt
+        component [Backward Compatible] as BackCompat
+        component [Easy Customer\nIntegration] as EasyInt
+        component [Reuse Measurements] as Reuse
+        
+        FixedInt -down-> BackCompat
+        BackCompat -down-> EasyInt
+        EasyInt -down-> Reuse
+    }
+}
+
+package "Problem: Non-Optimized Scheduling" as Problems {
+    
+    rectangle "Resource Waste" #CRITICAL {
+        card "Excessive RAM\nUsage" as ExRAM
+        card "CPU Overhead" as CPUOver
+        card "Many Mempool\nChunks" as ManyChunks
+    }
+    
+    rectangle "Timing Issues" #CRITICAL {
+        card "Unpredictable\nExecution" as Unpred
+        card "Priority\nInversion" as PrioInv
+        card "Missed\nDeadlines" as Missed
+    }
+    
+    rectangle "Data Issues" #CRITICAL {
+        card "Data\nInconsistency" as DataInc
+        card "Race\nConditions" as Race
+        card "Synchronization\nOverhead" as SyncOver
+    }
+}
+
+' Main flow connections
+Goal -down-> FixedSched
+FixedSched -down-> MinRunnable
+MinRunnable -down-> SchedRules
+
+' Benefits connections
+FixedSched -right-> MemEff
+MinRunnable -right-> DataCons
+SchedRules -right-> InterfaceStab
+
+' Problem connections
+VarSched -down-> Problems
+
+' Comparison
+FixedSched <-[#green,bold]-> VarSched : "vs"
+
+legend right
+    **Key Scheduling Optimization Reasons:**
+    
+    1. **Fixed Cycles = Predictable Memory**
+       └─ Reduces Daddy packet chunks
+    
+    2. **Minimal Runnables = Lower Overhead**
+       └─ Less context switching
+       └─ Atomic data delivery
+    
+    3. **Task Context Only = Deterministic**
+       └─ No interrupt unpredictability
+       └─ Better timing analysis
+    
+    4. **Stable Interfaces = Maintainability**
+       └─ Customer integration ease
+       └─ Measurement compatibility
+       
+    **Result: Optimized Resource Usage**
+end legend
+
+@enduml
